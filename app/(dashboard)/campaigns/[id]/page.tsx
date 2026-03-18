@@ -143,7 +143,7 @@ export default async function CampaignDetailPage({
 
           {/* 밴더 수수료 - 가장 중요 */}
           <div className="card p-4 border-blue-200 bg-blue-50 col-span-1">
-            <p className="text-xs text-blue-500 font-medium mb-1">우리 마진</p>
+            <p className="text-xs text-blue-500 font-medium mb-1">밴더사 수수료</p>
             <p className="text-xl font-bold text-blue-700">{formatCurrency(totalVendorFee)}<span className="text-xs font-normal text-blue-400 ml-0.5">원</span></p>
             <p className="text-xs text-blue-400 mt-0.5">{vendorFeeRate}%</p>
           </div>

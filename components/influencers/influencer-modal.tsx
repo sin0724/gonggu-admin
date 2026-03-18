@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -24,8 +24,11 @@ export default function InfluencerModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
-  const [searchInfluencer, setSearchInfluencer] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [selectedInfluencer, setSelectedInfluencer] = useState<Influencer | null>(null);
   const [isNewInfluencer, setIsNewInfluencer] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   const [formData, setFormData] = useState({
     influencer_id: record?.influencer_id ?? "",
@@ -52,13 +55,42 @@ export default function InfluencerModal({
         .select("*")
         .order("name");
       setInfluencers(data ?? []);
+
+      // 수정 모드일 때 선택된 인플루언서 세팅
+      if (record && data) {
+        const found = data.find((inf) => inf.id === record.influencer_id);
+        if (found) setSelectedInfluencer(found);
+      }
     };
     fetchInfluencers();
+  }, [record]);
+
+  // 드롭다운 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const filteredInfluencers = influencers.filter((inf) =>
-    inf.name.toLowerCase().includes(searchInfluencer.toLowerCase())
+    inf.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleSelectInfluencer = (inf: Influencer) => {
+    setSelectedInfluencer(inf);
+    setFormData((prev) => ({ ...prev, influencer_id: inf.id }));
+    setSearchQuery("");
+    setShowDropdown(false);
+  };
+
+  const handleClearInfluencer = () => {
+    setSelectedInfluencer(null);
+    setFormData((prev) => ({ ...prev, influencer_id: "" }));
+  };
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -80,7 +112,6 @@ export default function InfluencerModal({
       const supabase = createClient();
       let influencerId = formData.influencer_id;
 
-      // 신규 인플루언서 등록
       if (isNewInfluencer) {
         if (!formData.new_influencer_name.trim()) {
           setError("인플루언서 이름을 입력해주세요.");
@@ -136,8 +167,9 @@ export default function InfluencerModal({
 
       router.refresh();
       onClose();
-    } catch (e) {
-      setError("저장 중 오류가 발생했습니다.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : (e as { message?: string })?.message;
+      setError(msg ?? "저장 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
@@ -145,15 +177,12 @@ export default function InfluencerModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* 백드롭 */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      {/* 모달 */}
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        {/* 헤더 */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
           <h2 className="text-lg font-semibold text-gray-900">
             {record ? "인플루언서 정보 수정" : "인플루언서 추가"}
@@ -175,14 +204,14 @@ export default function InfluencerModal({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setIsNewInfluencer(false)}
+                  onClick={() => { setIsNewInfluencer(false); handleClearInfluencer(); }}
                   className={`btn btn-sm ${!isNewInfluencer ? "btn-primary" : "btn-secondary"}`}
                 >
                   기존 인플루언서
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsNewInfluencer(true)}
+                  onClick={() => { setIsNewInfluencer(true); handleClearInfluencer(); }}
                   className={`btn btn-sm ${isNewInfluencer ? "btn-primary" : "btn-secondary"}`}
                 >
                   신규 인플루언서
@@ -190,47 +219,62 @@ export default function InfluencerModal({
               </div>
 
               {!isNewInfluencer ? (
-                <div>
+                <div ref={searchRef} className="relative">
                   <label className="label">인플루언서 선택 *</label>
-                  <input
-                    type="text"
-                    value={searchInfluencer}
-                    onChange={(e) => setSearchInfluencer(e.target.value)}
-                    placeholder="이름으로 검색"
-                    className="input mb-2"
-                  />
-                  <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
-                    {filteredInfluencers.length === 0 ? (
-                      <p className="text-sm text-gray-400 p-3 text-center">
-                        검색 결과가 없습니다.
-                      </p>
-                    ) : (
-                      filteredInfluencers.map((inf) => (
-                        <button
-                          key={inf.id}
-                          type="button"
-                          onClick={() =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              influencer_id: inf.id,
-                            }))
-                          }
-                          className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors flex items-center justify-between ${
-                            formData.influencer_id === inf.id
-                              ? "bg-primary-50 text-primary-700"
-                              : ""
-                          }`}
-                        >
-                          <span>{inf.name}</span>
-                          {formData.influencer_id === inf.id && (
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </button>
-                      ))
-                    )}
-                  </div>
+
+                  {/* 선택된 인플루언서 표시 */}
+                  {selectedInfluencer ? (
+                    <div className="flex items-center justify-between px-3 py-2.5 border border-primary-300 bg-primary-50 rounded-lg">
+                      <span className="text-sm font-medium text-primary-800">
+                        {selectedInfluencer.name}
+                        {selectedInfluencer.account_url && (
+                          <span className="ml-2 text-xs text-primary-500 font-normal">{selectedInfluencer.account_url}</span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleClearInfluencer}
+                        className="text-primary-400 hover:text-primary-700 ml-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true); }}
+                      onFocus={() => setShowDropdown(true)}
+                      placeholder="이름으로 검색..."
+                      className="input"
+                      autoComplete="off"
+                    />
+                  )}
+
+                  {/* 드롭다운 */}
+                  {showDropdown && !selectedInfluencer && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {filteredInfluencers.length === 0 ? (
+                        <p className="text-sm text-gray-400 p-3 text-center">검색 결과가 없습니다.</p>
+                      ) : (
+                        filteredInfluencers.map((inf) => (
+                          <button
+                            key={inf.id}
+                            type="button"
+                            onMouseDown={() => handleSelectInfluencer(inf)}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors flex flex-col"
+                          >
+                            <span className="font-medium text-gray-900">{inf.name}</span>
+                            {inf.account_url && (
+                              <span className="text-xs text-gray-400 truncate">{inf.account_url}</span>
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -267,7 +311,7 @@ export default function InfluencerModal({
             <input
               type="text"
               name="personal_code"
-              value={formData.personal_code}
+              value={formData.personal_code ?? ""}
               onChange={handleChange}
               className="input"
               placeholder="예: BEAUTY001 또는 UTM 파라미터"
@@ -419,7 +463,6 @@ export default function InfluencerModal({
             </div>
           )}
 
-          {/* 버튼 */}
           <div className="flex items-center justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-secondary">
               취소

@@ -105,16 +105,10 @@ export default function InfluencerModal({
         return;
       }
 
-      if (!formData.personal_code.trim()) {
-        setError("개인 코드를 입력해주세요.");
-        setLoading(false);
-        return;
-      }
-
       const payload: CampaignInfluencerInsert = {
         campaign_id: campaignId,
         influencer_id: influencerId,
-        personal_code: formData.personal_code,
+        personal_code: formData.personal_code.trim() || null,
         is_product_sent: formData.is_product_sent,
         sent_date: formData.sent_date || null,
         content_url: formData.content_url || null,
@@ -269,15 +263,14 @@ export default function InfluencerModal({
 
           {/* 코드 */}
           <div>
-            <label className="label">개인 코드 *</label>
+            <label className="label">개인코드 / UTM <span className="text-gray-400 font-normal text-xs">(선택)</span></label>
             <input
               type="text"
               name="personal_code"
               value={formData.personal_code}
               onChange={handleChange}
               className="input"
-              placeholder="개인 할인/추적 코드"
-              required
+              placeholder="예: BEAUTY001 또는 UTM 파라미터"
             />
           </div>
 

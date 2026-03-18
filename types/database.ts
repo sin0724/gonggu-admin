@@ -59,7 +59,7 @@ export interface CampaignInfluencer {
   id: string;
   campaign_id: string;
   influencer_id: string;
-  personal_code: string;
+  personal_code: string | null;
   is_product_sent: boolean;
   sent_date: string | null;
   content_url: string | null;

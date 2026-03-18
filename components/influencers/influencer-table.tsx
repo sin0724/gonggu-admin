@@ -233,9 +233,13 @@ export default function InfluencerTable({
                           </div>
                         </td>
                         <td className="table-cell">
-                          <code className="bg-gray-100 px-2 py-0.5 rounded text-xs font-mono">
-                            {r.personal_code}
-                          </code>
+                          {r.personal_code ? (
+                            <code className="bg-gray-100 px-2 py-0.5 rounded text-xs font-mono">
+                              {r.personal_code}
+                            </code>
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
                         </td>
                         <td className="table-cell">
                           <span className={`badge ${STATUS_COLORS[status]}`}>

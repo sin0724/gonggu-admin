@@ -54,10 +54,17 @@ export default async function CampaignDetailPage({
     (r) => r.is_uploaded && !r.is_settled
   ).length;
 
-  // 정산 잔액: 총 판매액 - 총 정산금액
+  // 실적 기반 수익 계산
   const totalSales = records.reduce((sum, r) => sum + (r.sales_amount || 0), 0);
   const totalSettlement = records.reduce((sum, r) => sum + (r.settlement_amount || 0), 0);
   const settlementBalance = totalSales - totalSettlement;
+
+  // 밴더 수수료(우리 마진) = 총 판매액 × vendor_fee_rate%
+  const totalVendorFee = totalSales * (vendorFeeRate / 100);
+  // 인플루언서 RS = 총 판매액 × influencer_rs_rate%
+  const totalInfluencerRs = totalSales * (influencerRsRate / 100);
+  // 브랜드 수익 = 총 판매액 - 밴더 수수료 - 인플루언서 RS
+  const totalBrandProfit = totalSales - totalVendorFee - totalInfluencerRs;
 
   return (
     <div className="space-y-6">
@@ -172,6 +179,40 @@ export default async function CampaignDetailPage({
           </div>
         </div>
       </div>
+
+      {/* 실적 기반 수익 현황 */}
+      {records.length > 0 && totalSales > 0 && (
+        <div className="card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-900">수익 현황</h2>
+            <span className="text-xs text-gray-400">총 판매액 기준 실적 계산</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gray-50 rounded-xl p-4">
+              <p className="text-xs text-gray-500 mb-1">총 판매액</p>
+              <p className="text-xl font-bold text-gray-900">{formatCurrency(totalSales)}원</p>
+              <p className="text-xs text-gray-400 mt-1">인플루언서 {records.filter(r => r.sales_amount > 0).length}명 합산</p>
+            </div>
+            <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+              <p className="text-xs text-blue-600 mb-1 font-medium">밴더 수수료 (우리 마진)</p>
+              <p className="text-xl font-bold text-blue-700">{formatCurrency(totalVendorFee)}원</p>
+              <p className="text-xs text-blue-400 mt-1">판매액 × {vendorFeeRate}%</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4">
+              <p className="text-xs text-gray-500 mb-1">인플루언서 RS</p>
+              <p className="text-xl font-bold text-gray-700">{formatCurrency(totalInfluencerRs)}원</p>
+              <p className="text-xs text-gray-400 mt-1">판매액 × {influencerRsRate}%</p>
+            </div>
+            <div className="bg-green-50 rounded-xl p-4 border border-green-100">
+              <p className="text-xs text-green-600 mb-1 font-medium">브랜드 수익</p>
+              <p className="text-xl font-bold text-green-700">{formatCurrency(totalBrandProfit)}원</p>
+              <p className="text-xs text-green-400 mt-1">
+                {totalSales > 0 ? ((totalBrandProfit / totalSales) * 100).toFixed(1) : 0}%
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 추가 수치 요약 */}
       {records.length > 0 && (

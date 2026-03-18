@@ -13,12 +13,14 @@ interface InfluencerModalProps {
   campaignId: string;
   record?: CampaignInfluencer & { influencer: Influencer };
   onClose: () => void;
+  campaignInfluencerRsRate?: number;
 }
 
 export default function InfluencerModal({
   campaignId,
   record,
   onClose,
+  campaignInfluencerRsRate,
 }: InfluencerModalProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -28,6 +30,7 @@ export default function InfluencerModal({
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedInfluencer, setSelectedInfluencer] = useState<Influencer | null>(null);
   const [isNewInfluencer, setIsNewInfluencer] = useState(false);
+  const [isAutoCalc, setIsAutoCalc] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   const [formData, setFormData] = useState({
@@ -97,6 +100,25 @@ export default function InfluencerModal({
   ) => {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
+
+    if (name === "sales_amount") {
+      const salesVal = parseFloat(value) || 0;
+      if (campaignInfluencerRsRate !== undefined && campaignInfluencerRsRate > 0) {
+        const autoSettlement = Math.round(salesVal * (campaignInfluencerRsRate / 100));
+        setIsAutoCalc(true);
+        setFormData((prev) => ({
+          ...prev,
+          sales_amount: value,
+          settlement_amount: autoSettlement.toString(),
+        }));
+        return;
+      }
+    }
+
+    if (name === "settlement_amount") {
+      setIsAutoCalc(false);
+    }
+
     setFormData((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
@@ -380,6 +402,11 @@ export default function InfluencerModal({
           {/* 판매 및 정산 */}
           <div className="bg-gray-50 rounded-xl p-4 space-y-3">
             <h3 className="text-sm font-semibold text-gray-700">판매 및 정산</h3>
+            {campaignInfluencerRsRate !== undefined && campaignInfluencerRsRate > 0 && (
+              <p className="text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded-md">
+                캠페인 RS율 {campaignInfluencerRsRate}% 적용 — 판매액 입력 시 정산금액 자동계산
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">판매금액 (원)</label>
@@ -394,7 +421,14 @@ export default function InfluencerModal({
                 />
               </div>
               <div>
-                <label className="label">정산금액 (원)</label>
+                <label className="label flex items-center gap-2">
+                  정산금액 (원)
+                  {isAutoCalc && (
+                    <span className="text-xs font-normal bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                      자동계산됨
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   name="settlement_amount"

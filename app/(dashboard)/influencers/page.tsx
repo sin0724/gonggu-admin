@@ -3,10 +3,28 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Influencer } from "@/types/database";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatCurrency } from "@/lib/utils";
+
+interface InfluencerStats {
+  campaignCount: number;
+  totalSales: number;
+  totalSettlement: number;
+  unsettledCount: number;
+  campaigns: {
+    id: string;
+    campaign_id: string;
+    campaign_name: string;
+    client_name: string;
+    sales_amount: number;
+    settlement_amount: number;
+    is_settled: boolean;
+    created_at: string;
+  }[];
+}
 
 export default function InfluencersPage() {
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
+  const [statsMap, setStatsMap] = useState<Record<string, InfluencerStats>>({});
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -15,14 +33,68 @@ export default function InfluencersPage() {
   const [accountUrl, setAccountUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchInfluencers = async () => {
     const supabase = createClient();
-    const { data } = await supabase
+    const { data: infData } = await supabase
       .from("influencers")
       .select("*")
       .order("name");
-    setInfluencers(data ?? []);
+
+    const influencerList = infData ?? [];
+    setInfluencers(influencerList);
+
+    // campaign_influencers JOIN campaigns로 집계 데이터 조회
+    const { data: ciRaw } = await supabase
+      .from("campaign_influencers")
+      .select("id, influencer_id, campaign_id, sales_amount, settlement_amount, is_settled, is_uploaded, created_at, campaigns:campaign_id(campaign_name, client_name)");
+
+    type CiRow = {
+      id: string;
+      influencer_id: string;
+      campaign_id: string;
+      sales_amount: number;
+      settlement_amount: number;
+      is_settled: boolean;
+      is_uploaded: boolean;
+      created_at: string;
+      campaigns: { campaign_name: string; client_name: string } | { campaign_name: string; client_name: string }[] | null;
+    };
+
+    const ciData = (ciRaw ?? []) as CiRow[];
+
+    const newStatsMap: Record<string, InfluencerStats> = {};
+    ciData.forEach((ci) => {
+      const campaignInfo = Array.isArray(ci.campaigns) ? ci.campaigns[0] : ci.campaigns;
+      const infId = ci.influencer_id;
+      if (!newStatsMap[infId]) {
+        newStatsMap[infId] = {
+          campaignCount: 0,
+          totalSales: 0,
+          totalSettlement: 0,
+          unsettledCount: 0,
+          campaigns: [],
+        };
+      }
+      const stats = newStatsMap[infId];
+      stats.campaignCount++;
+      stats.totalSales += ci.sales_amount || 0;
+      stats.totalSettlement += ci.settlement_amount || 0;
+      if (!ci.is_settled) stats.unsettledCount++;
+      stats.campaigns.push({
+        id: ci.id,
+        campaign_id: ci.campaign_id,
+        campaign_name: campaignInfo?.campaign_name ?? "(알 수 없음)",
+        client_name: campaignInfo?.client_name ?? "",
+        sales_amount: ci.sales_amount || 0,
+        settlement_amount: ci.settlement_amount || 0,
+        is_settled: ci.is_settled,
+        created_at: ci.created_at,
+      });
+    });
+
+    setStatsMap(newStatsMap);
     setLoading(false);
   };
 
@@ -76,6 +148,10 @@ export default function InfluencersPage() {
     await supabase.from("influencers").delete().eq("id", id);
     await fetchInfluencers();
     setDeletingId(null);
+  };
+
+  const toggleExpand = (id: string) => {
+    setExpandedId((prev) => (prev === id ? null : id));
   };
 
   return (
@@ -132,60 +208,141 @@ export default function InfluencersPage() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="table-header">이름</th>
-                  <th className="table-header">계정 URL</th>
-                  <th className="table-header">등록일</th>
+                  <th className="table-header hidden md:table-cell">계정 URL</th>
+                  <th className="table-header">참여 캠페인</th>
+                  <th className="table-header hidden md:table-cell">누적 판매액</th>
+                  <th className="table-header hidden md:table-cell">누적 정산금액</th>
+                  <th className="table-header">미정산 건수</th>
+                  <th className="table-header hidden md:table-cell">등록일</th>
                   <th className="table-header text-right">관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-16 text-center text-gray-400 text-sm">
+                    <td colSpan={8} className="py-16 text-center text-gray-400 text-sm">
                       {search ? "검색 결과가 없습니다." : "등록된 인플루언서가 없습니다."}
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((inf) => (
-                    <tr key={inf.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="table-cell font-medium text-gray-900">
-                        {inf.name}
-                      </td>
-                      <td className="table-cell">
-                        {inf.account_url ? (
-                          <a
-                            href={inf.account_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary-600 hover:underline text-sm"
-                          >
-                            {inf.account_url}
-                          </a>
-                        ) : (
-                          <span className="text-gray-400">-</span>
+                  filtered.map((inf) => {
+                    const stats = statsMap[inf.id];
+                    const isExpanded = expandedId === inf.id;
+                    return (
+                      <>
+                        <tr key={inf.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="table-cell">
+                            <button
+                              onClick={() => toggleExpand(inf.id)}
+                              className="flex items-center gap-1.5 font-medium text-gray-900 hover:text-primary-600 transition-colors"
+                            >
+                              <svg
+                                className={`w-4 h-4 transition-transform text-gray-400 ${isExpanded ? "rotate-90" : ""}`}
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                              {inf.name}
+                            </button>
+                          </td>
+                          <td className="table-cell hidden md:table-cell">
+                            {inf.account_url ? (
+                              <a
+                                href={inf.account_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary-600 hover:underline text-sm"
+                              >
+                                {inf.account_url}
+                              </a>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </td>
+                          <td className="table-cell text-center">
+                            <span className="badge bg-blue-50 text-blue-700">
+                              {stats?.campaignCount ?? 0}건
+                            </span>
+                          </td>
+                          <td className="table-cell font-medium hidden md:table-cell">
+                            {stats?.totalSales ? formatCurrency(stats.totalSales) : "-"}
+                          </td>
+                          <td className="table-cell font-medium text-green-700 hidden md:table-cell">
+                            {stats?.totalSettlement ? formatCurrency(stats.totalSettlement) : "-"}
+                          </td>
+                          <td className="table-cell text-center">
+                            {(stats?.unsettledCount ?? 0) > 0 ? (
+                              <span className="badge bg-orange-100 text-orange-700">
+                                {stats.unsettledCount}건
+                              </span>
+                            ) : (
+                              <span className="text-gray-300 text-xs">-</span>
+                            )}
+                          </td>
+                          <td className="table-cell text-gray-500 text-xs hidden md:table-cell">
+                            {formatDate(inf.created_at)}
+                          </td>
+                          <td className="table-cell">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => openEdit(inf)}
+                                className="btn-secondary btn-sm"
+                              >
+                                수정
+                              </button>
+                              <button
+                                onClick={() => handleDelete(inf.id, inf.name)}
+                                disabled={deletingId === inf.id}
+                                className="btn btn-sm bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
+                              >
+                                삭제
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {/* 아코디언: 캠페인 참여 이력 */}
+                        {isExpanded && (
+                          <tr key={`${inf.id}-accordion`}>
+                            <td colSpan={8} className="bg-blue-50 px-6 py-3">
+                              {!stats || stats.campaigns.length === 0 ? (
+                                <p className="text-sm text-gray-400 py-2">참여한 캠페인이 없습니다.</p>
+                              ) : (
+                                <div className="space-y-1">
+                                  <p className="text-xs font-semibold text-gray-600 mb-2">캠페인 참여 이력</p>
+                                  <div className="grid gap-2">
+                                    {stats.campaigns.map((ci) => (
+                                      <div
+                                        key={ci.id}
+                                        className="flex items-center justify-between bg-white rounded-lg px-4 py-2 border border-blue-100 text-sm"
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <span className="font-medium text-gray-900">{ci.campaign_name}</span>
+                                          <span className="text-gray-400 text-xs">{ci.client_name}</span>
+                                        </div>
+                                        <div className="flex items-center gap-4 text-xs">
+                                          <span className="text-gray-600">
+                                            판매: {ci.sales_amount > 0 ? formatCurrency(ci.sales_amount) : "-"}
+                                          </span>
+                                          <span className="text-green-700">
+                                            정산: {ci.settlement_amount > 0 ? formatCurrency(ci.settlement_amount) : "-"}
+                                          </span>
+                                          <span className={`badge text-xs ${ci.is_settled ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"}`}>
+                                            {ci.is_settled ? "정산완료" : "미정산"}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="table-cell text-gray-500 text-xs">
-                        {formatDate(inf.created_at)}
-                      </td>
-                      <td className="table-cell">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => openEdit(inf)}
-                            className="btn-secondary btn-sm"
-                          >
-                            수정
-                          </button>
-                          <button
-                            onClick={() => handleDelete(inf.id, inf.name)}
-                            disabled={deletingId === inf.id}
-                            className="btn btn-sm bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
-                          >
-                            삭제
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                      </>
+                    );
+                  })
                 )}
               </tbody>
             </table>

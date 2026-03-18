@@ -43,6 +43,22 @@ export default async function CampaignDetailPage({
   const formatCurrency = (n: number) =>
     n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 
+  // 추가 수치 계산
+  // 미업로드 인원: 발송완료(is_product_sent=true) 중 업로드 안된(is_uploaded=false) 건수
+  const notUploadedCount = records.filter(
+    (r) => r.is_product_sent && !r.is_uploaded
+  ).length;
+
+  // 미정산 인원: 업로드완료(is_uploaded=true) 중 정산 안된(is_settled=false) 건수
+  const notSettledCount = records.filter(
+    (r) => r.is_uploaded && !r.is_settled
+  ).length;
+
+  // 정산 잔액: 총 판매액 - 총 정산금액
+  const totalSales = records.reduce((sum, r) => sum + (r.sales_amount || 0), 0);
+  const totalSettlement = records.reduce((sum, r) => sum + (r.settlement_amount || 0), 0);
+  const settlementBalance = totalSales - totalSettlement;
+
   return (
     <div className="space-y-6">
       {/* 브레드크럼 */}
@@ -157,10 +173,41 @@ export default async function CampaignDetailPage({
         </div>
       </div>
 
+      {/* 추가 수치 요약 */}
+      {records.length > 0 && (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="card p-4">
+            <p className="text-xs text-gray-500">미업로드 인원</p>
+            <p className={`text-2xl font-bold mt-1 ${notUploadedCount > 0 ? "text-yellow-600" : "text-gray-400"}`}>
+              {notUploadedCount}명
+            </p>
+            <p className="text-xs text-gray-400 mt-1">발송완료 후 미업로드</p>
+          </div>
+          <div className="card p-4">
+            <p className="text-xs text-gray-500">미정산 인원</p>
+            <p className={`text-2xl font-bold mt-1 ${notSettledCount > 0 ? "text-orange-600" : "text-gray-400"}`}>
+              {notSettledCount}명
+            </p>
+            <p className="text-xs text-gray-400 mt-1">업로드완료 후 미정산</p>
+          </div>
+          <div className="card p-4">
+            <p className="text-xs text-gray-500">정산 잔액</p>
+            <p className={`text-2xl font-bold mt-1 ${settlementBalance > 0 ? "text-red-600" : "text-gray-400"}`}>
+              {formatCurrency(settlementBalance)}원
+            </p>
+            <p className="text-xs text-gray-400 mt-1">총 판매액 - 총 정산금액</p>
+          </div>
+        </div>
+      )}
+
       {/* 인플루언서 섹션 */}
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-4">참여 인플루언서</h2>
-        <InfluencerTable campaignId={id} records={records} />
+        <InfluencerTable
+          campaignId={id}
+          records={records}
+          campaignInfluencerRsRate={campaign.influencer_rs_rate ?? undefined}
+        />
       </div>
     </div>
   );

@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
-  CampaignInfluencer,
   CampaignInfluencerWithDetails,
   ProgressStatus,
   getProgressStatus,
@@ -16,6 +15,7 @@ import InfluencerModal from "./influencer-modal";
 interface InfluencerTableProps {
   campaignId: string;
   records: CampaignInfluencerWithDetails[];
+  campaignInfluencerRsRate?: number;
 }
 
 const STATUS_OPTIONS: ProgressStatus[] = [
@@ -26,9 +26,12 @@ const STATUS_OPTIONS: ProgressStatus[] = [
   "정산완료",
 ];
 
+type CheckboxField = "is_product_sent" | "is_uploaded" | "is_settled";
+
 export default function InfluencerTable({
   campaignId,
   records,
+  campaignInfluencerRsRate,
 }: InfluencerTableProps) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -38,6 +41,7 @@ export default function InfluencerTable({
     CampaignInfluencerWithDetails | undefined
   >(undefined);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const filtered = records.filter((r) => {
     const matchName = r.influencer.name
@@ -46,6 +50,20 @@ export default function InfluencerTable({
     const status = getProgressStatus(r);
     const matchStatus = statusFilter === "전체" || status === statusFilter;
     return matchName && matchStatus;
+  });
+
+  // 각 탭별 건수
+  const statusCounts: Record<ProgressStatus | "전체", number> = {
+    전체: records.length,
+    발송대기: 0,
+    업로드대기: 0,
+    판매중: 0,
+    정산대기: 0,
+    정산완료: 0,
+  };
+  records.forEach((r) => {
+    const s = getProgressStatus(r);
+    statusCounts[s]++;
   });
 
   const totalSales = records.reduce((sum, r) => sum + (r.sales_amount || 0), 0);
@@ -76,6 +94,27 @@ export default function InfluencerTable({
     }
   };
 
+  const handleToggleCheckbox = async (
+    id: string,
+    field: CheckboxField,
+    currentValue: boolean
+  ) => {
+    setTogglingId(id + field);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("campaign_influencers")
+        .update({ [field]: !currentValue })
+        .eq("id", id);
+      if (error) throw error;
+      router.refresh();
+    } catch {
+      alert("업데이트 중 오류가 발생했습니다.");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   const handleEdit = (record: CampaignInfluencerWithDetails) => {
     setEditRecord(record);
     setShowModal(true);
@@ -89,6 +128,62 @@ export default function InfluencerTable({
   const handleCloseModal = () => {
     setShowModal(false);
     setEditRecord(undefined);
+  };
+
+  const handleExportCSV = () => {
+    const headers = [
+      "인플루언서명",
+      "계정링크",
+      "개인코드",
+      "발송여부",
+      "발송일",
+      "콘텐츠URL",
+      "업로드여부",
+      "판매액",
+      "정산방식",
+      "정산금액",
+      "정산여부",
+      "정산일",
+      "진행상태",
+      "메모",
+    ];
+
+    const rows = filtered.map((r) => {
+      const status = getProgressStatus(r);
+      return [
+        r.influencer.name,
+        r.influencer.account_url ?? "",
+        r.personal_code ?? "",
+        r.is_product_sent ? "Y" : "N",
+        r.sent_date ?? "",
+        r.content_url ?? "",
+        r.is_uploaded ? "Y" : "N",
+        r.sales_amount?.toString() ?? "0",
+        r.settlement_method ?? "",
+        r.settlement_amount?.toString() ?? "0",
+        r.is_settled ? "Y" : "N",
+        r.settled_date ?? "",
+        status,
+        r.notes ?? "",
+      ];
+    });
+
+    const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const csvContent =
+      "\uFEFF" +
+      [headers.map(escape).join(","), ...rows.map((row) => row.map(escape).join(","))].join(
+        "\n"
+      );
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `influencers_${campaignId}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -116,65 +211,80 @@ export default function InfluencerTable({
           </div>
         </div>
 
-        {/* 필터 + 추가 버튼 */}
+        {/* 검색 + 버튼 */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3 flex-1 flex-wrap">
-            {/* 검색 */}
-            <div className="relative min-w-[200px]">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="인플루언서명 검색"
-                className="input pl-9"
+          <div className="relative min-w-[200px] flex-1 max-w-sm">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
               />
-            </div>
-
-            {/* 상태 필터 */}
-            <div className="flex items-center gap-1 flex-wrap">
-              <button
-                onClick={() => setStatusFilter("전체")}
-                className={`btn btn-sm ${
-                  statusFilter === "전체"
-                    ? "btn-primary"
-                    : "btn-secondary"
-                }`}
-              >
-                전체
-              </button>
-              {STATUS_OPTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className={`btn btn-sm ${
-                    statusFilter === s ? "btn-primary" : "btn-secondary"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button onClick={handleAdd} className="btn-primary whitespace-nowrap">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            인플루언서 추가
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="인플루언서명 검색"
+              className="input pl-9"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportCSV}
+              className="btn-secondary whitespace-nowrap"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              CSV 내보내기
+            </button>
+            <button onClick={handleAdd} className="btn-primary whitespace-nowrap">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              인플루언서 추가
+            </button>
+          </div>
+        </div>
+
+        {/* 상태 탭 필터 */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            onClick={() => setStatusFilter("전체")}
+            className={`btn btn-sm flex items-center gap-1.5 ${
+              statusFilter === "전체" ? "btn-primary" : "btn-secondary"
+            }`}
+          >
+            전체
+            <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${
+              statusFilter === "전체" ? "bg-white/30 text-white" : "bg-gray-100 text-gray-600"
+            }`}>
+              {statusCounts["전체"]}
+            </span>
           </button>
+          {STATUS_OPTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`btn btn-sm flex items-center gap-1.5 ${
+                statusFilter === s ? "btn-primary" : "btn-secondary"
+              }`}
+            >
+              {s}
+              <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${
+                statusFilter === s ? "bg-white/30 text-white" : "bg-gray-100 text-gray-600"
+              }`}>
+                {statusCounts[s]}
+              </span>
+            </button>
+          ))}
         </div>
 
         {/* 테이블 */}
@@ -184,14 +294,17 @@ export default function InfluencerTable({
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="table-header">인플루언서</th>
-                  <th className="table-header">개인코드</th>
+                  <th className="table-header hidden md:table-cell">개인코드</th>
                   <th className="table-header">진행상태</th>
-                  <th className="table-header">발송일</th>
-                  <th className="table-header">콘텐츠</th>
-                  <th className="table-header">판매금액</th>
-                  <th className="table-header">정산금액</th>
-                  <th className="table-header">정산방법</th>
-                  <th className="table-header">메모</th>
+                  <th className="table-header hidden md:table-cell">발송일</th>
+                  <th className="table-header hidden md:table-cell">콘텐츠</th>
+                  <th className="table-header hidden md:table-cell">판매금액</th>
+                  <th className="table-header hidden md:table-cell">정산금액</th>
+                  <th className="table-header hidden md:table-cell">정산방법</th>
+                  <th className="table-header">발송</th>
+                  <th className="table-header">업로드</th>
+                  <th className="table-header">정산</th>
+                  <th className="table-header hidden md:table-cell">메모</th>
                   <th className="table-header text-right">관리</th>
                 </tr>
               </thead>
@@ -199,7 +312,7 @@ export default function InfluencerTable({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={13}
                       className="py-16 text-center text-gray-400 text-sm"
                     >
                       {search || statusFilter !== "전체"
@@ -210,6 +323,7 @@ export default function InfluencerTable({
                 ) : (
                   filtered.map((r) => {
                     const status = getProgressStatus(r);
+                    const isToggling = togglingId !== null;
                     return (
                       <tr
                         key={r.id}
@@ -232,7 +346,7 @@ export default function InfluencerTable({
                             )}
                           </div>
                         </td>
-                        <td className="table-cell">
+                        <td className="table-cell hidden md:table-cell">
                           {r.personal_code ? (
                             <code className="bg-gray-100 px-2 py-0.5 rounded text-xs font-mono">
                               {r.personal_code}
@@ -246,10 +360,10 @@ export default function InfluencerTable({
                             {status}
                           </span>
                         </td>
-                        <td className="table-cell text-gray-500 text-xs">
+                        <td className="table-cell text-gray-500 text-xs hidden md:table-cell">
                           {formatDate(r.sent_date)}
                         </td>
-                        <td className="table-cell">
+                        <td className="table-cell hidden md:table-cell">
                           {r.content_url ? (
                             <a
                               href={r.content_url}
@@ -263,20 +377,56 @@ export default function InfluencerTable({
                             <span className="text-gray-400 text-xs">-</span>
                           )}
                         </td>
-                        <td className="table-cell text-right font-medium">
+                        <td className="table-cell text-right font-medium hidden md:table-cell">
                           {r.sales_amount > 0
                             ? formatCurrency(r.sales_amount)
                             : "-"}
                         </td>
-                        <td className="table-cell text-right font-medium text-green-700">
+                        <td className="table-cell text-right font-medium text-green-700 hidden md:table-cell">
                           {r.settlement_amount > 0
                             ? formatCurrency(r.settlement_amount)
                             : "-"}
                         </td>
-                        <td className="table-cell text-gray-500 text-xs">
+                        <td className="table-cell text-gray-500 text-xs hidden md:table-cell">
                           {r.settlement_method || "-"}
                         </td>
-                        <td className="table-cell text-gray-500 text-xs max-w-[120px] truncate">
+                        {/* 인라인 체크박스 - 발송여부 */}
+                        <td className="table-cell text-center">
+                          <input
+                            type="checkbox"
+                            checked={r.is_product_sent}
+                            disabled={isToggling}
+                            onChange={() =>
+                              handleToggleCheckbox(r.id, "is_product_sent", r.is_product_sent)
+                            }
+                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                        {/* 인라인 체크박스 - 업로드여부 */}
+                        <td className="table-cell text-center">
+                          <input
+                            type="checkbox"
+                            checked={r.is_uploaded}
+                            disabled={isToggling}
+                            onChange={() =>
+                              handleToggleCheckbox(r.id, "is_uploaded", r.is_uploaded)
+                            }
+                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                        {/* 인라인 체크박스 - 정산여부 */}
+                        <td className="table-cell text-center">
+                          <input
+                            type="checkbox"
+                            checked={r.is_settled}
+                            disabled={isToggling}
+                            onChange={() =>
+                              handleToggleCheckbox(r.id, "is_settled", r.is_settled)
+                            }
+                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="table-cell text-gray-500 text-xs max-w-[120px] truncate hidden md:table-cell">
                           {r.notes || "-"}
                         </td>
                         <td className="table-cell">
@@ -321,6 +471,7 @@ export default function InfluencerTable({
           campaignId={campaignId}
           record={editRecord}
           onClose={handleCloseModal}
+          campaignInfluencerRsRate={campaignInfluencerRsRate}
         />
       )}
     </>

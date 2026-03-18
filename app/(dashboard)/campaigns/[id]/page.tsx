@@ -33,6 +33,16 @@ export default async function CampaignDetailPage({
   const records = (rawRecords ?? []) as CampaignInfluencerWithDetails[];
   const active = isCampaignActive(campaign.start_date, campaign.end_date);
 
+  const gonguPrice = campaign.gonggu_price ?? 0;
+  const vendorFeeRate = campaign.vendor_fee_rate ?? 0;
+  const influencerRsRate = campaign.influencer_rs_rate ?? 0;
+  const vendorFeeAmount = gonguPrice * (vendorFeeRate / 100);
+  const influencerRsAmount = gonguPrice * (influencerRsRate / 100);
+  const brandAmount = gonguPrice - vendorFeeAmount - influencerRsAmount;
+  const brandRate = gonguPrice > 0 ? (brandAmount / gonguPrice) * 100 : 0;
+  const formatCurrency = (n: number) =>
+    n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
+
   return (
     <div className="space-y-6">
       {/* 브레드크럼 */}
@@ -75,11 +85,35 @@ export default async function CampaignDetailPage({
           </Link>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          <div>
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">RS</p>
-            <p className="text-sm text-gray-900">{campaign.rs || "-"}</p>
+        {/* RS 수익 구조 */}
+        {gonguPrice > 0 && (
+          <div className="mb-6 bg-gray-50 rounded-lg p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">RS 수익 구조</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center">
+                <p className="text-xs text-gray-400 mb-1">공구가</p>
+                <p className="text-sm font-semibold text-gray-900">{formatCurrency(gonguPrice)}원</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-400 mb-1">밴더 수수료</p>
+                <p className="text-sm font-semibold text-red-600">-{formatCurrency(vendorFeeAmount)}원</p>
+                <p className="text-xs text-gray-400">{vendorFeeRate}%</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-400 mb-1">인플루언서 RS</p>
+                <p className="text-sm font-semibold text-blue-600">-{formatCurrency(influencerRsAmount)}원</p>
+                <p className="text-xs text-gray-400">{influencerRsRate}%</p>
+              </div>
+              <div className="text-center bg-white rounded-md p-2 border border-gray-200">
+                <p className="text-xs text-gray-400 mb-1">브랜드 수익</p>
+                <p className="text-sm font-bold text-green-600">{formatCurrency(brandAmount)}원</p>
+                <p className="text-xs text-gray-400">{brandRate.toFixed(1)}%</p>
+              </div>
+            </div>
           </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">공구 기간</p>
             <p className="text-sm text-gray-900">

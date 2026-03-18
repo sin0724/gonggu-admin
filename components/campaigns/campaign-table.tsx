@@ -80,7 +80,7 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
               <tr>
                 <th className="table-header">캠페인명</th>
                 <th className="table-header">클라이언트</th>
-                <th className="table-header">RS</th>
+                <th className="table-header">공구가</th>
                 <th className="table-header">시작일</th>
                 <th className="table-header">종료일</th>
                 <th className="table-header">상태</th>
@@ -109,7 +109,9 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
                         </Link>
                       </td>
                       <td className="table-cell text-gray-600">{campaign.client_name}</td>
-                      <td className="table-cell text-gray-500">{campaign.rs || "-"}</td>
+                      <td className="table-cell text-gray-500">
+                        {campaign.gonggu_price ? `${campaign.gonggu_price.toLocaleString("ko-KR")}원` : "-"}
+                      </td>
                       <td className="table-cell text-gray-500 text-xs">{formatDate(campaign.start_date)}</td>
                       <td className="table-cell text-gray-500 text-xs">{formatDate(campaign.end_date)}</td>
                       <td className="table-cell">

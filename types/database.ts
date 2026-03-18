@@ -32,7 +32,9 @@ export interface Campaign {
   id: string;
   client_name: string;
   campaign_name: string;
-  rs: string | null;
+  gonggu_price: number | null;
+  vendor_fee_rate: number | null;
+  influencer_rs_rate: number | null;
   start_date: string | null;
   end_date: string | null;
   purchase_form_url: string | null;

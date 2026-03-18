@@ -189,28 +189,6 @@ export default function InfluencerTable({
   return (
     <>
       <div className="space-y-4">
-        {/* 요약 카드 */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="card p-4">
-            <p className="text-xs text-gray-500">참여 인플루언서</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">
-              {records.length}명
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-gray-500">총 판매금액</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">
-              {formatCurrency(totalSales)}
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-gray-500">총 정산금액</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">
-              {formatCurrency(totalSettlement)}
-            </p>
-          </div>
-        </div>
-
         {/* 검색 + 버튼 */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="relative min-w-[200px] flex-1 max-w-sm">

@@ -96,6 +96,15 @@ export default async function CampaignDetailPage({
               <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
+              {campaign.normal_price && (
+                <>
+                  <span className="text-gray-400 line-through text-xs">{formatCurrency(campaign.normal_price)}원</span>
+                  <span className="text-red-500 text-xs font-medium">
+                    {(((campaign.normal_price - campaign.gonggu_price) / campaign.normal_price) * 100).toFixed(0)}%↓
+                  </span>
+                  <span className="text-gray-300">|</span>
+                </>
+              )}
               공구가 {formatCurrency(campaign.gonggu_price)}원
               <span className="text-gray-300">|</span>
               <span className="text-blue-600 font-medium">밴더 {vendorFeeRate}%</span>
@@ -112,6 +121,15 @@ export default async function CampaignDetailPage({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
               구매 양식
+            </a>
+          )}
+          {campaign.response_sheet_url && (
+            <a href={campaign.response_sheet_url} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1 text-primary-600 hover:text-primary-700">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              응답 시트
             </a>
           )}
           {campaign.drive_url && (
@@ -186,6 +204,7 @@ export default async function CampaignDetailPage({
           campaignId={id}
           records={records}
           campaignInfluencerRsRate={campaign.influencer_rs_rate ?? undefined}
+          campaignPurchaseFormUrl={campaign.purchase_form_url ?? undefined}
         />
       </div>
     </div>

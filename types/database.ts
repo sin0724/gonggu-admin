@@ -32,12 +32,14 @@ export interface Campaign {
   id: string;
   client_name: string;
   campaign_name: string;
+  normal_price: number | null;
   gonggu_price: number | null;
   vendor_fee_rate: number | null;
   influencer_rs_rate: number | null;
   start_date: string | null;
   end_date: string | null;
   purchase_form_url: string | null;
+  response_sheet_url: string | null;
   drive_url: string | null;
   created_at: string;
 }
@@ -59,7 +61,8 @@ export interface CampaignInfluencer {
   id: string;
   campaign_id: string;
   influencer_id: string;
-  personal_code: string | null;
+  purchase_url: string | null;
+  sheet_url: string | null;
   is_product_sent: boolean;
   sent_date: string | null;
   content_url: string | null;

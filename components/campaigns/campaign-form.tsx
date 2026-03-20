@@ -18,12 +18,14 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const [formData, setFormData] = useState({
     client_name: campaign?.client_name ?? "",
     campaign_name: campaign?.campaign_name ?? "",
+    normal_price: campaign?.normal_price?.toString() ?? "",
     gonggu_price: campaign?.gonggu_price?.toString() ?? "",
     vendor_fee_rate: campaign?.vendor_fee_rate?.toString() ?? "",
     influencer_rs_rate: campaign?.influencer_rs_rate?.toString() ?? "",
     start_date: campaign?.start_date ?? "",
     end_date: campaign?.end_date ?? "",
     purchase_form_url: campaign?.purchase_form_url ?? "",
+    response_sheet_url: campaign?.response_sheet_url ?? "",
     drive_url: campaign?.drive_url ?? "",
   });
 
@@ -32,8 +34,10 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // 브랜드 수익 자동 계산
+  // 가격 계산
+  const normalPrice = parseFloat(formData.normal_price) || 0;
   const gonguPrice = parseFloat(formData.gonggu_price) || 0;
+  const discountRate = normalPrice > 0 && gonguPrice > 0 ? ((normalPrice - gonguPrice) / normalPrice) * 100 : 0;
   const vendorFeeRate = parseFloat(formData.vendor_fee_rate) || 0;
   const influencerRsRate = parseFloat(formData.influencer_rs_rate) || 0;
 
@@ -56,12 +60,14 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
       const payload: CampaignInsert = {
         client_name: formData.client_name,
         campaign_name: formData.campaign_name,
+        normal_price: formData.normal_price ? parseFloat(formData.normal_price) : null,
         gonggu_price: formData.gonggu_price ? parseFloat(formData.gonggu_price) : null,
         vendor_fee_rate: formData.vendor_fee_rate ? parseFloat(formData.vendor_fee_rate) : null,
         influencer_rs_rate: formData.influencer_rs_rate ? parseFloat(formData.influencer_rs_rate) : null,
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
         purchase_form_url: formData.purchase_form_url || null,
+        response_sheet_url: formData.response_sheet_url || null,
         drive_url: formData.drive_url || null,
       };
 
@@ -81,6 +87,32 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           .eq("id", campaign.id);
 
         if (error) throw error;
+
+        // 인플루언서 RS% 변경 시 → 미정산 인플루언서 정산금액 자동 재계산
+        const newRsRate = payload.influencer_rs_rate ?? 0;
+        const oldRsRate = campaign.influencer_rs_rate ?? 0;
+        if (newRsRate !== oldRsRate && newRsRate > 0) {
+          const { data: unsettled } = await supabase
+            .from("campaign_influencers")
+            .select("id, sales_amount")
+            .eq("campaign_id", campaign.id)
+            .eq("is_settled", false)
+            .gt("sales_amount", 0);
+
+          if (unsettled && unsettled.length > 0) {
+            await Promise.all(
+              unsettled.map((ci) =>
+                supabase
+                  .from("campaign_influencers")
+                  .update({
+                    settlement_amount: Math.round((ci.sales_amount ?? 0) * (newRsRate / 100)),
+                  })
+                  .eq("id", ci.id)
+              )
+            );
+          }
+        }
+
         router.push(`/campaigns/${campaign.id}`);
       }
 
@@ -133,11 +165,30 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
       {/* RS 정보 */}
       <div className="card p-6">
         <h2 className="text-base font-semibold text-gray-900 mb-1">RS 정보</h2>
-        <p className="text-xs text-gray-400 mb-5">
+        <p className="text-xs text-gray-400 mb-1">
           공구가 기준으로 밴더 수수료와 인플루언서 RS를 입력하면 브랜드 수익이 자동 계산됩니다.
         </p>
+        {mode === "edit" && (
+          <p className="text-xs text-blue-500 mb-4">
+            인플루언서 RS% 변경 시 미정산 인플루언서의 정산금액이 자동으로 재계산됩니다.
+          </p>
+        )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-5">
+          <div>
+            <label className="label">정상가 (원)</label>
+            <input
+              type="number"
+              name="normal_price"
+              value={formData.normal_price}
+              onChange={handleChange}
+              className="input"
+              placeholder="예: 50000"
+              min="0"
+            />
+            <p className="text-xs text-gray-400 mt-1">할인율 확인용</p>
+          </div>
+
           <div>
             <label className="label">공구가 (원)</label>
             <input
@@ -149,6 +200,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               placeholder="예: 30000"
               min="0"
             />
+            {normalPrice > 0 && gonguPrice > 0 && (
+              <p className="text-xs text-blue-500 mt-1">↓ {discountRate.toFixed(1)}% 할인</p>
+            )}
           </div>
 
           <div>
@@ -187,7 +241,14 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         {gonguPrice > 0 && (
           <div className="bg-gray-50 rounded-lg p-4">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">수익 구조 미리보기</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {normalPrice > 0 && (
+                <div className="text-center">
+                  <p className="text-xs text-gray-400 mb-1">정상가</p>
+                  <p className="text-sm font-semibold text-gray-500 line-through">{formatCurrency(normalPrice)}원</p>
+                  <p className="text-xs text-red-500 font-medium">{discountRate.toFixed(1)}% 할인</p>
+                </div>
+              )}
               <div className="text-center">
                 <p className="text-xs text-gray-400 mb-1">공구가</p>
                 <p className="text-sm font-semibold text-gray-900">{formatCurrency(gonguPrice)}원</p>
@@ -260,6 +321,19 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               className="input"
               placeholder="https://..."
             />
+          </div>
+
+          <div>
+            <label className="label">응답 시트 링크</label>
+            <input
+              type="url"
+              name="response_sheet_url"
+              value={formData.response_sheet_url}
+              onChange={handleChange}
+              className="input"
+              placeholder="https://docs.google.com/spreadsheets/..."
+            />
+            <p className="text-xs text-gray-400 mt-1">구매 양식과 연동된 Google Sheets</p>
           </div>
 
           <div>

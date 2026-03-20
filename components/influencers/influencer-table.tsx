@@ -16,6 +16,7 @@ interface InfluencerTableProps {
   campaignId: string;
   records: CampaignInfluencerWithDetails[];
   campaignInfluencerRsRate?: number;
+  campaignPurchaseFormUrl?: string;
 }
 
 const STATUS_OPTIONS: ProgressStatus[] = [
@@ -32,6 +33,7 @@ export default function InfluencerTable({
   campaignId,
   records,
   campaignInfluencerRsRate,
+  campaignPurchaseFormUrl,
 }: InfluencerTableProps) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -134,7 +136,8 @@ export default function InfluencerTable({
     const headers = [
       "인플루언서명",
       "계정링크",
-      "개인코드",
+      "구매링크",
+      "주문시트링크",
       "발송여부",
       "발송일",
       "콘텐츠URL",
@@ -153,7 +156,8 @@ export default function InfluencerTable({
       return [
         r.influencer.name,
         r.influencer.account_url ?? "",
-        r.personal_code ?? "",
+        r.purchase_url ?? "",
+        r.sheet_url ?? "",
         r.is_product_sent ? "Y" : "N",
         r.sent_date ?? "",
         r.content_url ?? "",
@@ -272,7 +276,8 @@ export default function InfluencerTable({
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="table-header">인플루언서</th>
-                  <th className="table-header hidden md:table-cell">개인코드</th>
+                  <th className="table-header hidden md:table-cell">구매링크</th>
+                  <th className="table-header hidden md:table-cell">시트</th>
                   <th className="table-header">진행상태</th>
                   <th className="table-header hidden md:table-cell">발송일</th>
                   <th className="table-header hidden md:table-cell">콘텐츠</th>
@@ -290,7 +295,7 @@ export default function InfluencerTable({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={13}
+                      colSpan={14}
                       className="py-16 text-center text-gray-400 text-sm"
                     >
                       {search || statusFilter !== "전체"
@@ -325,12 +330,23 @@ export default function InfluencerTable({
                           </div>
                         </td>
                         <td className="table-cell hidden md:table-cell">
-                          {r.personal_code ? (
-                            <code className="bg-gray-100 px-2 py-0.5 rounded text-xs font-mono">
-                              {r.personal_code}
-                            </code>
+                          {r.purchase_url ? (
+                            <a href={r.purchase_url} target="_blank" rel="noopener noreferrer"
+                              className="text-primary-600 hover:underline text-xs">
+                              링크
+                            </a>
                           ) : (
-                            <span className="text-gray-300">-</span>
+                            <span className="text-gray-300 text-xs">-</span>
+                          )}
+                        </td>
+                        <td className="table-cell hidden md:table-cell">
+                          {r.sheet_url ? (
+                            <a href={r.sheet_url} target="_blank" rel="noopener noreferrer"
+                              className="text-primary-600 hover:underline text-xs">
+                              시트
+                            </a>
+                          ) : (
+                            <span className="text-gray-300 text-xs">-</span>
                           )}
                         </td>
                         <td className="table-cell">
@@ -450,6 +466,7 @@ export default function InfluencerTable({
           record={editRecord}
           onClose={handleCloseModal}
           campaignInfluencerRsRate={campaignInfluencerRsRate}
+          campaignPurchaseFormUrl={campaignPurchaseFormUrl}
         />
       )}
     </>

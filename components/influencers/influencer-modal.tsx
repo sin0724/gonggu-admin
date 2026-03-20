@@ -14,6 +14,7 @@ interface InfluencerModalProps {
   record?: CampaignInfluencer & { influencer: Influencer };
   onClose: () => void;
   campaignInfluencerRsRate?: number;
+  campaignPurchaseFormUrl?: string;
 }
 
 export default function InfluencerModal({
@@ -21,6 +22,7 @@ export default function InfluencerModal({
   record,
   onClose,
   campaignInfluencerRsRate,
+  campaignPurchaseFormUrl,
 }: InfluencerModalProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -31,13 +33,38 @@ export default function InfluencerModal({
   const [selectedInfluencer, setSelectedInfluencer] = useState<Influencer | null>(null);
   const [isNewInfluencer, setIsNewInfluencer] = useState(false);
   const [isAutoCalc, setIsAutoCalc] = useState(false);
+  const [utmCode, setUtmCode] = useState("");
+  const [utmSource, setUtmSource] = useState("instagram");
+  const [copied, setCopied] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+
+  const buildUtmUrl = () => {
+    if (!campaignPurchaseFormUrl || !utmCode.trim()) return "";
+    const base = campaignPurchaseFormUrl;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}utm_source=${encodeURIComponent(utmSource)}&utm_medium=influencer&utm_content=${encodeURIComponent(utmCode.trim())}`;
+  };
+
+  const generatedUrl = buildUtmUrl();
+
+  const handleCopyUtm = () => {
+    if (!generatedUrl) return;
+    navigator.clipboard.writeText(generatedUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleApplyUtm = () => {
+    if (!generatedUrl) return;
+    setFormData((prev) => ({ ...prev, purchase_url: generatedUrl }));
+  };
 
   const [formData, setFormData] = useState({
     influencer_id: record?.influencer_id ?? "",
     new_influencer_name: "",
     new_influencer_account_url: "",
-    personal_code: record?.personal_code ?? "",
+    purchase_url: record?.purchase_url ?? "",
+    sheet_url: record?.sheet_url ?? "",
     is_product_sent: record?.is_product_sent ?? false,
     sent_date: record?.sent_date ?? "",
     content_url: record?.content_url ?? "",
@@ -161,7 +188,8 @@ export default function InfluencerModal({
       const payload: CampaignInfluencerInsert = {
         campaign_id: campaignId,
         influencer_id: influencerId,
-        personal_code: formData.personal_code.trim() || null,
+        purchase_url: formData.purchase_url.trim() || null,
+        sheet_url: formData.sheet_url.trim() || null,
         is_product_sent: formData.is_product_sent,
         sent_date: formData.sent_date || null,
         content_url: formData.content_url || null,
@@ -327,17 +355,86 @@ export default function InfluencerModal({
             </div>
           )}
 
-          {/* 코드 */}
-          <div>
-            <label className="label">개인코드 / UTM <span className="text-gray-400 font-normal text-xs">(선택)</span></label>
-            <input
-              type="text"
-              name="personal_code"
-              value={formData.personal_code ?? ""}
-              onChange={handleChange}
-              className="input"
-              placeholder="예: BEAUTY001 또는 UTM 파라미터"
-            />
+          {/* 링크 */}
+          <div className="space-y-4">
+            {/* UTM 빌더 */}
+            {campaignPurchaseFormUrl && (
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-semibold text-blue-700">UTM 링크 빌더</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-1">
+                    <label className="label text-xs">유입 채널</label>
+                    <select
+                      value={utmSource}
+                      onChange={(e) => setUtmSource(e.target.value)}
+                      className="input text-sm"
+                    >
+                      <option value="instagram">Instagram</option>
+                      <option value="youtube">YouTube</option>
+                      <option value="tiktok">TikTok</option>
+                      <option value="blog">Blog</option>
+                      <option value="facebook">Facebook</option>
+                      <option value="other">기타</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="label text-xs">식별 코드 <span className="text-gray-400 font-normal">(인플루언서명 또는 코드)</span></label>
+                    <input
+                      type="text"
+                      value={utmCode}
+                      onChange={(e) => setUtmCode(e.target.value)}
+                      className="input text-sm"
+                      placeholder="예: beauty_jisoo"
+                    />
+                  </div>
+                </div>
+                {generatedUrl && (
+                  <div className="bg-white rounded-lg p-2.5 border border-blue-200">
+                    <p className="text-xs text-gray-500 mb-1.5">생성된 URL</p>
+                    <p className="text-xs text-gray-700 break-all font-mono leading-relaxed">{generatedUrl}</p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={handleCopyUtm}
+                        className="btn-secondary btn-sm text-xs"
+                      >
+                        {copied ? "복사됨 ✓" : "URL 복사"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleApplyUtm}
+                        className="btn-primary btn-sm text-xs"
+                      >
+                        구매링크에 적용
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div>
+              <label className="label">개인 구매링크 <span className="text-gray-400 font-normal text-xs">(선택)</span></label>
+              <input
+                type="url"
+                name="purchase_url"
+                value={formData.purchase_url ?? ""}
+                onChange={handleChange}
+                className="input"
+                placeholder="https://..."
+              />
+            </div>
+            <div>
+              <label className="label">주문 시트 링크 <span className="text-gray-400 font-normal text-xs">(선택)</span></label>
+              <input
+                type="url"
+                name="sheet_url"
+                value={formData.sheet_url ?? ""}
+                onChange={handleChange}
+                className="input"
+                placeholder="https://docs.google.com/spreadsheets/..."
+              />
+            </div>
           </div>
 
           {/* 발송 정보 */}

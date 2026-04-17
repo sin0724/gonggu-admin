@@ -86,6 +86,29 @@ export interface CampaignInfluencerWithDetails extends CampaignInfluencer {
   influencer: Influencer;
 }
 
+export type ProspectStatus = "발송완료" | "입점완료" | "무응답" | "거절";
+
+export interface Prospect {
+  id: string;
+  company_name: string;
+  business_number: string;
+  contact_name: string | null;
+  phone: string | null;
+  notes: string | null;
+  status: ProspectStatus;
+  created_at: string;
+}
+
+export type ProspectInsert = Omit<Prospect, "id" | "created_at">;
+export type ProspectUpdate = Partial<ProspectInsert>;
+
+export const PROSPECT_STATUS_COLORS: Record<ProspectStatus, string> = {
+  발송완료: "bg-blue-100 text-blue-700",
+  입점완료: "bg-green-100 text-green-700",
+  무응답: "bg-gray-100 text-gray-700",
+  거절: "bg-red-100 text-red-700",
+};
+
 export type ProgressStatus =
   | "발송대기"
   | "업로드대기"

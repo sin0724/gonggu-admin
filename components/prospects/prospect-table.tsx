@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import {
   Prospect,
@@ -50,6 +51,28 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
     setModalOpen(true);
   };
 
+  const handleExport = () => {
+    const rows = filtered.map((p) => ({
+      상호명: p.company_name,
+      사업자번호: p.business_number,
+      담당자명: p.contact_name ?? "",
+      전화번호: p.phone ?? "",
+      상태: p.status,
+      특이사항: p.notes ?? "",
+      등록일: new Date(p.created_at).toLocaleDateString("ko-KR"),
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 20 }, { wch: 16 }, { wch: 12 },
+      { wch: 16 }, { wch: 10 }, { wch: 30 }, { wch: 12 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "가망건");
+    const date = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `가망건_${date}.xlsx`);
+  };
+
   const handleDelete = async (id: string) => {
     const supabase = createClient();
     await supabase.from("prospects").delete().eq("id", id);
@@ -84,6 +107,15 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
             placeholder="상호명 또는 사업자번호 검색"
             className="input text-sm flex-1 sm:w-64"
           />
+          <button
+            onClick={handleExport}
+            className="btn-secondary whitespace-nowrap flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            엑셀 내보내기
+          </button>
           <button
             onClick={() => { setEditTarget(undefined); setModalOpen(true); }}
             className="btn-primary whitespace-nowrap"

@@ -4,24 +4,27 @@ import { useState, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import {
-  Prospect,
+  Manager,
+  ProspectWithManager,
   ProspectStatus,
   PROSPECT_STATUS_COLORS,
 } from "@/types/database";
 import ProspectModal from "./prospect-modal";
 
 interface ProspectTableProps {
-  initialProspects: Prospect[];
+  initialProspects: ProspectWithManager[];
+  managers: Manager[];
 }
 
 const ALL_STATUSES: (ProspectStatus | "전체")[] = ["전체", "발송완료", "입점완료", "무응답", "거절"];
 
-export default function ProspectTable({ initialProspects }: ProspectTableProps) {
-  const [prospects, setProspects] = useState<Prospect[]>(initialProspects);
+export default function ProspectTable({ initialProspects, managers }: ProspectTableProps) {
+  const [prospects, setProspects] = useState<ProspectWithManager[]>(initialProspects);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProspectStatus | "전체">("전체");
+  const [managerFilter, setManagerFilter] = useState<string>("전체");
   const [modalOpen, setModalOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<Prospect | undefined>(undefined);
+  const [editTarget, setEditTarget] = useState<ProspectWithManager | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
@@ -31,22 +34,25 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
         p.company_name.toLowerCase().includes(search.toLowerCase()) ||
         p.business_number.includes(search);
       const matchStatus = statusFilter === "전체" || p.status === statusFilter;
-      return matchSearch && matchStatus;
+      const matchManager =
+        managerFilter === "전체" ||
+        (managerFilter === "미배정" ? !p.manager_id : p.manager_id === managerFilter);
+      return matchSearch && matchStatus && matchManager;
     });
-  }, [prospects, search, statusFilter]);
+  }, [prospects, search, statusFilter, managerFilter]);
 
   const handleSaved = async () => {
     const supabase = createClient();
     const { data } = await supabase
       .from("prospects")
-      .select("*")
+      .select("*, manager:managers(*)")
       .order("created_at", { ascending: false });
-    setProspects(data ?? []);
+    setProspects((data as ProspectWithManager[]) ?? []);
     setModalOpen(false);
     setEditTarget(undefined);
   };
 
-  const handleEdit = (prospect: Prospect) => {
+  const handleEdit = (prospect: ProspectWithManager) => {
     setEditTarget(prospect);
     setModalOpen(true);
   };
@@ -57,6 +63,7 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
       사업자번호: p.business_number,
       담당자명: p.contact_name ?? "",
       전화번호: p.phone ?? "",
+      우리측담당자: p.manager?.name ?? "",
       상태: p.status,
       특이사항: p.notes ?? "",
       등록일: new Date(p.created_at).toLocaleDateString("ko-KR"),
@@ -65,7 +72,7 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [
       { wch: 20 }, { wch: 16 }, { wch: 12 },
-      { wch: 16 }, { wch: 10 }, { wch: 30 }, { wch: 12 },
+      { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 12 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "가망건");
@@ -83,46 +90,88 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
   return (
     <>
       {/* 상단 컨트롤 */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div className="flex gap-2 flex-wrap">
-          {ALL_STATUSES.map((s) => (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+          <div className="flex gap-2 flex-wrap">
+            {ALL_STATUSES.map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  statusFilter === s
+                    ? "bg-primary-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="상호명 또는 사업자번호 검색"
+              className="input text-sm flex-1 sm:w-56"
+            />
             <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
+              onClick={handleExport}
+              className="btn-secondary whitespace-nowrap flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              엑셀 내보내기
+            </button>
+            <button
+              onClick={() => { setEditTarget(undefined); setModalOpen(true); }}
+              className="btn-primary whitespace-nowrap"
+            >
+              + 신규 등록
+            </button>
+          </div>
+        </div>
+
+        {/* 담당자 필터 */}
+        {managers.length > 0 && (
+          <div className="flex gap-2 flex-wrap items-center">
+            <span className="text-xs text-gray-500 font-medium">담당자:</span>
+            <button
+              onClick={() => setManagerFilter("전체")}
               className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                statusFilter === s
-                  ? "bg-primary-600 text-white"
+                managerFilter === "전체"
+                  ? "bg-indigo-600 text-white"
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
-              {s}
+              전체
             </button>
-          ))}
-        </div>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="상호명 또는 사업자번호 검색"
-            className="input text-sm flex-1 sm:w-64"
-          />
-          <button
-            onClick={handleExport}
-            className="btn-secondary whitespace-nowrap flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            엑셀 내보내기
-          </button>
-          <button
-            onClick={() => { setEditTarget(undefined); setModalOpen(true); }}
-            className="btn-primary whitespace-nowrap"
-          >
-            + 신규 등록
-          </button>
-        </div>
+            {managers.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setManagerFilter(m.id)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  managerFilter === m.id
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {m.name}
+              </button>
+            ))}
+            <button
+              onClick={() => setManagerFilter("미배정")}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                managerFilter === "미배정"
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              미배정
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 테이블 */}
@@ -133,8 +182,9 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="text-left px-4 py-3 font-medium text-gray-500">상호명</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">사업자번호</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">담당자명</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">업체 담당자</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">전화번호</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">우리측 담당자</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">상태</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">특이사항</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">등록일</th>
@@ -144,8 +194,10 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-gray-400 text-sm">
-                    {search || statusFilter !== "전체" ? "검색 결과가 없습니다." : "등록된 가망건이 없습니다."}
+                  <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
+                    {search || statusFilter !== "전체" || managerFilter !== "전체"
+                      ? "검색 결과가 없습니다."
+                      : "등록된 가망건이 없습니다."}
                   </td>
                 </tr>
               ) : (
@@ -156,11 +208,20 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
                     <td className="px-4 py-3 text-gray-600">{p.contact_name ?? "-"}</td>
                     <td className="px-4 py-3 text-gray-600">{p.phone ?? "-"}</td>
                     <td className="px-4 py-3">
+                      {p.manager ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                          {p.manager.name}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">미배정</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PROSPECT_STATUS_COLORS[p.status]}`}>
                         {p.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">{p.notes ?? "-"}</td>
+                    <td className="px-4 py-3 text-gray-500 max-w-[180px] truncate">{p.notes ?? "-"}</td>
                     <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
                       {new Date(p.created_at).toLocaleDateString("ko-KR")}
                     </td>
@@ -197,6 +258,7 @@ export default function ProspectTable({ initialProspects }: ProspectTableProps) 
       {modalOpen && (
         <ProspectModal
           prospect={editTarget}
+          managers={managers}
           onClose={() => { setModalOpen(false); setEditTarget(undefined); }}
           onSaved={handleSaved}
         />

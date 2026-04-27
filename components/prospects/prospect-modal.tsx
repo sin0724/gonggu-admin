@@ -3,13 +3,15 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  Prospect,
+  Manager,
+  ProspectWithManager,
   ProspectInsert,
   ProspectStatus,
 } from "@/types/database";
 
 interface ProspectModalProps {
-  prospect?: Prospect;
+  prospect?: ProspectWithManager;
+  managers: Manager[];
   onClose: () => void;
   onSaved: () => void;
 }
@@ -23,9 +25,10 @@ const EMPTY_FORM = {
   phone: "",
   notes: "",
   status: "발송완료" as ProspectStatus,
+  manager_id: "",
 };
 
-export default function ProspectModal({ prospect, onClose, onSaved }: ProspectModalProps) {
+export default function ProspectModal({ prospect, managers, onClose, onSaved }: ProspectModalProps) {
   const isEdit = !!prospect;
   const [formData, setFormData] = useState(
     prospect
@@ -36,6 +39,7 @@ export default function ProspectModal({ prospect, onClose, onSaved }: ProspectMo
           phone: prospect.phone ?? "",
           notes: prospect.notes ?? "",
           status: prospect.status,
+          manager_id: prospect.manager_id ?? "",
         }
       : EMPTY_FORM
   );
@@ -72,6 +76,7 @@ export default function ProspectModal({ prospect, onClose, onSaved }: ProspectMo
         phone: formData.phone || null,
         notes: formData.notes || null,
         status: formData.status,
+        manager_id: formData.manager_id || null,
       };
 
       if (isEdit) {
@@ -81,7 +86,6 @@ export default function ProspectModal({ prospect, onClose, onSaved }: ProspectMo
           .eq("id", prospect.id);
         if (error) throw error;
       } else {
-        // 중복 사업자번호 체크
         const { data: existing } = await supabase
           .from("prospects")
           .select("id")
@@ -154,7 +158,7 @@ export default function ProspectModal({ prospect, onClose, onSaved }: ProspectMo
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">담당자명</label>
+              <label className="label">담당자명 (업체측)</label>
               <input
                 type="text"
                 name="contact_name"
@@ -177,18 +181,36 @@ export default function ProspectModal({ prospect, onClose, onSaved }: ProspectMo
             </div>
           </div>
 
-          <div>
-            <label className="label">상태</label>
-            <select
-              name="status"
-              value={formData.status}
-              onChange={handleChange}
-              className="input"
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">우리측 담당자</label>
+              <select
+                name="manager_id"
+                value={formData.manager_id}
+                onChange={handleChange}
+                className="input"
+              >
+                <option value="">담당자 없음</option>
+                {managers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">상태</label>
+              <select
+                name="status"
+                value={formData.status}
+                onChange={handleChange}
+                className="input"
+              >
+                {STATUS_OPTIONS.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div>

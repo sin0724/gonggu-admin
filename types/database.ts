@@ -86,6 +86,17 @@ export interface CampaignInfluencerWithDetails extends CampaignInfluencer {
   influencer: Influencer;
 }
 
+export interface Manager {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  created_at: string;
+}
+
+export type ManagerInsert = Omit<Manager, "id" | "created_at">;
+export type ManagerUpdate = Partial<ManagerInsert>;
+
 export type ProspectStatus = "발송완료" | "입점완료" | "무응답" | "거절";
 
 export interface Prospect {
@@ -96,7 +107,12 @@ export interface Prospect {
   phone: string | null;
   notes: string | null;
   status: ProspectStatus;
+  manager_id: string | null;
   created_at: string;
+}
+
+export interface ProspectWithManager extends Prospect {
+  manager: Manager | null;
 }
 
 export type ProspectInsert = Omit<Prospect, "id" | "created_at">;

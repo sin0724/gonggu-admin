@@ -26,6 +26,19 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ProspectWithManager | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
+
+  const duplicateNumbers = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of prospects) {
+      counts.set(p.business_number, (counts.get(p.business_number) ?? 0) + 1);
+    }
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([num]) => num)
+    );
+  }, [prospects]);
 
   const filtered = useMemo(() => {
     return prospects.filter((p) => {
@@ -37,9 +50,10 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
       const matchManager =
         managerFilter === "전체" ||
         (managerFilter === "미배정" ? !p.manager_id : p.manager_id === managerFilter);
-      return matchSearch && matchStatus && matchManager;
+      const matchDuplicate = !showDuplicatesOnly || duplicateNumbers.has(p.business_number);
+      return matchSearch && matchStatus && matchManager && matchDuplicate;
     });
-  }, [prospects, search, statusFilter, managerFilter]);
+  }, [prospects, search, statusFilter, managerFilter, showDuplicatesOnly, duplicateNumbers]);
 
   const handleSaved = async () => {
     const supabase = createClient();
@@ -92,7 +106,7 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
       {/* 상단 컨트롤 */}
       <div className="flex flex-col gap-3">
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
             {ALL_STATUSES.map((s) => (
               <button
                 key={s}
@@ -106,6 +120,22 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
                 {s}
               </button>
             ))}
+            <div className="w-px h-4 bg-gray-300 mx-1" />
+            <button
+              onClick={() => setShowDuplicatesOnly((v) => !v)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${
+                showDuplicatesOnly
+                  ? "bg-amber-500 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              중복
+              {duplicateNumbers.size > 0 && (
+                <span className={`rounded-full px-1.5 text-[10px] font-bold ${showDuplicatesOnly ? "bg-white text-amber-600" : "bg-amber-500 text-white"}`}>
+                  {duplicateNumbers.size}
+                </span>
+              )}
+            </button>
           </div>
           <div className="flex gap-2 w-full sm:w-auto">
             <input
@@ -195,7 +225,9 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
-                    {search || statusFilter !== "전체" || managerFilter !== "전체"
+                    {showDuplicatesOnly
+                      ? "중복된 사업자번호가 없습니다."
+                      : search || statusFilter !== "전체" || managerFilter !== "전체"
                       ? "검색 결과가 없습니다."
                       : "등록된 가망건이 없습니다."}
                   </td>
@@ -204,7 +236,14 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
                 filtered.map((p) => (
                   <tr key={p.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-900">{p.company_name}</td>
-                    <td className="px-4 py-3 text-gray-600">{p.business_number}</td>
+                    <td className="px-4 py-3 text-gray-600">
+                      <span className="flex items-center gap-1">
+                        {p.business_number}
+                        {duplicateNumbers.has(p.business_number) && (
+                          <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">중복</span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-gray-600">{p.contact_name ?? "-"}</td>
                     <td className="px-4 py-3 text-gray-600">{p.phone ?? "-"}</td>
                     <td className="px-4 py-3">

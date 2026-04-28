@@ -1,0 +1,7 @@
+-- RS 자동 계산을 위한 추가 필드
+ALTER TABLE campaigns
+  ADD COLUMN IF NOT EXISTS online_min_price NUMERIC,
+  ADD COLUMN IF NOT EXISTS supply_price NUMERIC,
+  ADD COLUMN IF NOT EXISTS shipping_fee NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS shipping_payer TEXT DEFAULT 'buyer',
+  ADD COLUMN IF NOT EXISTS vat_included BOOLEAN DEFAULT true;

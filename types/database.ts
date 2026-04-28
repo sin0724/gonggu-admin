@@ -33,9 +33,14 @@ export interface Campaign {
   client_name: string;
   campaign_name: string;
   normal_price: number | null;
+  online_min_price: number | null;
+  supply_price: number | null;
   gonggu_price: number | null;
   vendor_fee_rate: number | null;
   influencer_rs_rate: number | null;
+  shipping_fee: number | null;
+  shipping_payer: string | null;
+  vat_included: boolean | null;
   start_date: string | null;
   end_date: string | null;
   purchase_form_url: string | null;

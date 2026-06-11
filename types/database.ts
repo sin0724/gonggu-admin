@@ -28,10 +28,13 @@ export interface Database {
   };
 }
 
+export type DealType = "rs" | "supply";
+
 export interface Campaign {
   id: string;
   client_name: string;
   campaign_name: string;
+  deal_type: DealType | null;
   normal_price: number | null;
   online_min_price: number | null;
   supply_price: number | null;

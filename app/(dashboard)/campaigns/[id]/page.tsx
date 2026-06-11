@@ -36,18 +36,16 @@ export default async function CampaignDetailPage({
   const vendorFeeRate = campaign.vendor_fee_rate ?? 0;
   const influencerRsRate = campaign.influencer_rs_rate ?? 0;
   const supplyPrice = campaign.supply_price ?? 0;
-  const sellerShippingFee =
-    campaign.shipping_payer === "seller" ? campaign.shipping_fee ?? 0 : 0;
 
   const formatCurrency = (n: number) =>
     n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 
-  // KPI 계산 — 돈 흐름 모델: 벤더사 마진 = 판매액 × 벤더%, KOL은 실제 정산금액 기준
+  // KPI 계산 — 돈 흐름 모델:
+  //   클라이언트 정산액 = 수량 × 공급가 (클라이언트 몫)
+  //   벤더사 마진 = 판매액 − 클라이언트 정산액 − KOL 지급액 (잔여분)
   const totalSales = records.reduce((sum, r) => sum + (r.sales_amount || 0), 0);
   const totalSettlement = records.reduce((sum, r) => sum + (r.settlement_amount || 0), 0);
-  const totalVendorMargin = totalSales * (vendorFeeRate / 100);
   const totalKolRs = totalSettlement > 0 ? totalSettlement : totalSales * (influencerRsRate / 100);
-  const clientGross = totalSales - totalVendorMargin - totalKolRs;
 
   // 판매 수량 (직접 입력 합계, 없으면 공구가로 추정)
   const inputQuantity = records.reduce((sum, r) => sum + (r.quantity || 0), 0);
@@ -58,11 +56,34 @@ export default async function CampaignDetailPage({
   const quantity = inputQuantity > 0 ? inputQuantity : estimatedQuantity;
   const isQuantityEstimated = inputQuantity === 0 && estimatedQuantity > 0;
 
-  // 클라이언트 마진 = 정산액 − 원가(수량×공급가) − 판매자부담 배송비
-  const clientMargin =
-    supplyPrice > 0 && quantity > 0
-      ? clientGross - quantity * supplyPrice - quantity * sellerShippingFee
-      : null;
+  // 딜 방식별 분배: RS형 = 판매액 × (1−총RS%)가 클라이언트 몫,
+  //                공급가형 = 수량 × 공급가가 클라이언트 몫. 벤더 마진은 잔여분.
+  const dealType = campaign.deal_type === "supply" ? "supply" : "rs";
+  const totalRsEff =
+    campaign.total_rs_rate ?? influencerRsRate + vendorFeeRate;
+  const isRsDeal = dealType === "rs" && totalRsEff > 0;
+  const isSupplyDeal = dealType === "supply" && supplyPrice > 0 && quantity > 0;
+
+  let clientPayout: number;
+  let totalVendorMargin: number;
+  let payoutNote: string;
+  let vendorNote: string;
+  if (isRsDeal) {
+    clientPayout = totalSales * (1 - totalRsEff / 100);
+    totalVendorMargin = totalSales - clientPayout - totalKolRs;
+    payoutNote = `판매액 × ${100 - totalRsEff}% (RS형)`;
+    vendorNote = `판매액 × 총 RS ${totalRsEff}% − KOL 지급액`;
+  } else if (isSupplyDeal) {
+    clientPayout = quantity * supplyPrice;
+    totalVendorMargin = totalSales - clientPayout - totalKolRs;
+    payoutNote = `수량 × 공급가 ${formatCurrency(supplyPrice)}원${isQuantityEstimated ? " · 수량 추정" : ""}`;
+    vendorNote = `판매액 − 공급가 − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
+  } else {
+    totalVendorMargin = totalSales * (vendorFeeRate / 100);
+    clientPayout = totalSales - totalVendorMargin - totalKolRs;
+    payoutNote = "판매액 − 총 RS (조건 미입력 시 추정)";
+    vendorNote = `판매액 × ${vendorFeeRate}% (추정)`;
+  }
 
   const notUploadedCount = records.filter((r) => r.is_product_sent && !r.is_uploaded).length;
   const notSettledCount = records.filter((r) => r.is_uploaded && !r.is_settled).length;
@@ -200,8 +221,10 @@ export default async function CampaignDetailPage({
           {/* 벤더사 마진 - 가장 중요 */}
           <div className="card p-4 border-blue-200 bg-blue-50 col-span-1">
             <p className="text-xs text-blue-500 font-medium mb-1">벤더사 마진 (우리)</p>
-            <p className="text-xl font-bold text-blue-700">{formatCurrency(totalVendorMargin)}<span className="text-xs font-normal text-blue-400 ml-0.5">원</span></p>
-            <p className="text-xs text-blue-400 mt-0.5">판매액 × {vendorFeeRate}%</p>
+            <p className={`text-xl font-bold ${totalVendorMargin >= 0 ? "text-blue-700" : "text-red-600"}`}>
+              {formatCurrency(totalVendorMargin)}<span className="text-xs font-normal text-blue-400 ml-0.5">원</span>
+            </p>
+            <p className="text-xs text-blue-400 mt-0.5">{vendorNote}</p>
           </div>
 
           {/* KOL RS 지급액 */}
@@ -213,24 +236,13 @@ export default async function CampaignDetailPage({
             </p>
           </div>
 
-          {/* 클라이언트 마진 */}
+          {/* 클라이언트 정산액 */}
           <div className="card p-4 border-green-200 bg-green-50">
-            <p className="text-xs text-green-500 font-medium mb-1">클라이언트 마진</p>
-            {clientMargin !== null ? (
-              <>
-                <p className={`text-xl font-bold ${clientMargin >= 0 ? "text-green-700" : "text-red-600"}`}>
-                  {formatCurrency(clientMargin)}<span className="text-xs font-normal text-green-400 ml-0.5">원</span>
-                </p>
-                <p className="text-xs text-green-400 mt-0.5">
-                  RS·원가{sellerShippingFee > 0 ? "·배송비" : ""} 차감 후{isQuantityEstimated && " · 수량 추정"}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-xl font-bold text-green-700">{formatCurrency(clientGross)}<span className="text-xs font-normal text-green-400 ml-0.5">원</span></p>
-                <p className="text-xs text-green-400 mt-0.5">RS 차감 후 (공급가 미입력 → 원가 미반영)</p>
-              </>
-            )}
+            <p className="text-xs text-green-500 font-medium mb-1">클라이언트 정산액</p>
+            <p className="text-xl font-bold text-green-700">
+              {formatCurrency(clientPayout)}<span className="text-xs font-normal text-green-400 ml-0.5">원</span>
+            </p>
+            <p className="text-xs text-green-400 mt-0.5">{payoutNote}</p>
           </div>
 
           {/* 미업로드 */}

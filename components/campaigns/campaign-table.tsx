@@ -78,6 +78,7 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
         .insert({
           campaign_name: `${campaign.campaign_name} (복사)`,
           client_name: campaign.client_name,
+          deal_type: campaign.deal_type,
           normal_price: campaign.normal_price,
           online_min_price: campaign.online_min_price,
           supply_price: campaign.supply_price,

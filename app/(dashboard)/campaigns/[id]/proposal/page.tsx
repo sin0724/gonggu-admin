@@ -34,14 +34,14 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
     campaign.total_rs_rate ??
     (campaign.influencer_rs_rate ?? 0) + (campaign.vendor_fee_rate ?? 0);
 
+  const dealType = campaign.deal_type === "supply" ? "supply" : "rs";
   const econ = computeUnitEconomics({
+    dealType,
     gongguPrice,
     supplyPrice,
     influencerRsRate: campaign.influencer_rs_rate ?? 0,
     vendorFeeRate: campaign.vendor_fee_rate ?? 0,
     totalRsRate,
-    shippingFee: campaign.shipping_fee ?? 0,
-    shippingPayer: campaign.shipping_payer ?? "buyer",
     vatIncluded,
     normalPrice,
     onlineMinPrice,
@@ -51,8 +51,6 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
     n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 
   const totalRsAmount = gongguPrice * (totalRsRate / 100);
-  // 클라이언트 예상 수익(1건): 공구가 − 총 RS − 공급가 − 판매자부담 배송비
-  const clientMarginPerUnit = econ.clientMarginPerUnit;
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
@@ -201,43 +199,25 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
           </div>
         </div>
 
-        {/* 클라이언트 예상 수익 (공급가 입력 시) */}
-        {supplyPrice > 0 && gongguPrice > 0 && (
+        {/* 정산 조건 */}
+        {econ.clientTakePerUnit !== null && (
           <div>
             <h2 className="text-base font-semibold text-gray-900 mb-4">
-              귀사 예상 수익 (1건 판매 기준)
+              정산 조건
             </h2>
             <div className="divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden text-sm">
               <div className="flex justify-between px-4 py-3">
-                <span className="text-gray-500">공구가</span>
+                <span className="text-gray-500">귀사 정산 단가</span>
                 <span className="font-semibold text-gray-900">
-                  +{fmt(gongguPrice)}원
+                  개당 {fmt(econ.clientTakePerUnit)}원
                 </span>
               </div>
               <div className="flex justify-between px-4 py-3">
-                <span className="text-gray-500">마케팅 수수료 ({totalRsRate}%)</span>
-                <span className="font-semibold text-red-500">
-                  -{fmt(totalRsAmount)}원
-                </span>
-              </div>
-              <div className="flex justify-between px-4 py-3">
-                <span className="text-gray-500">제품 원가 (공급가)</span>
-                <span className="font-semibold text-red-500">
-                  -{fmt(supplyPrice)}원
-                </span>
-              </div>
-              {econ.sellerShipping > 0 && (
-                <div className="flex justify-between px-4 py-3">
-                  <span className="text-gray-500">배송비 (판매자 부담)</span>
-                  <span className="font-semibold text-red-500">
-                    -{fmt(econ.sellerShipping)}원
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between px-4 py-3.5 bg-green-50">
-                <span className="font-bold text-gray-900">예상 수익</span>
-                <span className="font-bold text-green-700 text-base">
-                  {fmt(clientMarginPerUnit)}원 ({econ.clientMarginRate.toFixed(1)}%)
+                <span className="text-gray-500">정산 방식</span>
+                <span className="font-semibold text-gray-900">
+                  {dealType === "rs"
+                    ? `판매액 × ${100 - totalRsRate}% (총 RS ${totalRsRate}% 차감)`
+                    : "판매 수량 × 공급가 기준 정산"}
                 </span>
               </div>
             </div>

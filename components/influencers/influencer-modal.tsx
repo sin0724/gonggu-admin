@@ -7,7 +7,24 @@ import {
   CampaignInfluencer,
   CampaignInfluencerInsert,
   Influencer,
+  ContentItem,
+  ContentType,
+  CONTENT_TYPE_LABEL,
+  hasBankDetails,
 } from "@/types/database";
+
+const CONTENT_TYPE_OPTIONS = Object.entries(CONTENT_TYPE_LABEL) as [
+  ContentType,
+  string
+][];
+
+const SETTLEMENT_METHOD_SUGGESTIONS = [
+  "계좌이체",
+  "해외송금 (SWIFT)",
+  "PayPal",
+  "현금",
+  "기타",
+];
 
 interface InfluencerModalProps {
   campaignId: string;
@@ -59,15 +76,22 @@ export default function InfluencerModal({
     setFormData((prev) => ({ ...prev, purchase_url: generatedUrl }));
   };
 
+  // 콘텐츠 다건 (기존 단일 content_url 데이터는 '기타'로 변환해 표시)
+  const [contents, setContents] = useState<ContentItem[]>(
+    record?.contents && record.contents.length > 0
+      ? record.contents
+      : record?.content_url
+      ? [{ type: "other", url: record.content_url }]
+      : []
+  );
+
   const [formData, setFormData] = useState({
     influencer_id: record?.influencer_id ?? "",
     new_influencer_name: "",
     new_influencer_account_url: "",
     purchase_url: record?.purchase_url ?? "",
-    sheet_url: record?.sheet_url ?? "",
     is_product_sent: record?.is_product_sent ?? false,
     sent_date: record?.sent_date ?? "",
-    content_url: record?.content_url ?? "",
     is_uploaded: record?.is_uploaded ?? false,
     sales_amount: record?.sales_amount?.toString() ?? "0",
     quantity: record?.quantity?.toString() ?? "0",
@@ -186,14 +210,18 @@ export default function InfluencerModal({
         return;
       }
 
+      const validContents = contents.filter((c) => c.url.trim() !== "");
+
       const payload: CampaignInfluencerInsert = {
         campaign_id: campaignId,
         influencer_id: influencerId,
         purchase_url: formData.purchase_url.trim() || null,
-        sheet_url: formData.sheet_url.trim() || null,
+        // 주문 시트는 더 이상 사용하지 않음 — 기존 값만 보존
+        sheet_url: record?.sheet_url ?? null,
         is_product_sent: formData.is_product_sent,
         sent_date: formData.sent_date || null,
-        content_url: formData.content_url || null,
+        contents: validContents,
+        content_url: validContents[0]?.url ?? null,
         is_uploaded: formData.is_uploaded,
         sales_amount: parseFloat(formData.sales_amount) || 0,
         quantity: parseInt(formData.quantity, 10) || 0,
@@ -436,17 +464,6 @@ export default function InfluencerModal({
                   : "이 KOL 전용 구매 링크 (캠페인 공통 링크가 없는 경우 필수)"}
               </p>
             </div>
-            <div>
-              <label className="label">주문 시트 링크 <span className="text-gray-400 font-normal text-xs">(선택)</span></label>
-              <input
-                type="url"
-                name="sheet_url"
-                value={formData.sheet_url ?? ""}
-                onChange={handleChange}
-                className="input"
-                placeholder="https://docs.google.com/spreadsheets/..."
-              />
-            </div>
           </div>
 
           {/* 발송 정보 */}
@@ -481,7 +498,12 @@ export default function InfluencerModal({
 
           {/* 콘텐츠 업로드 */}
           <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-gray-700">콘텐츠 업로드</h3>
+            <h3 className="text-sm font-semibold text-gray-700">
+              콘텐츠 업로드{" "}
+              <span className="text-xs font-normal text-gray-400">
+                — 릴스·스토리·쓰레드 등 여러 개 등록 가능
+              </span>
+            </h3>
             <div className="flex items-center gap-3">
               <input
                 type="checkbox"
@@ -495,16 +517,70 @@ export default function InfluencerModal({
                 콘텐츠 업로드 완료
               </label>
             </div>
-            <div>
-              <label className="label">콘텐츠 URL</label>
-              <input
-                type="url"
-                name="content_url"
-                value={formData.content_url}
-                onChange={handleChange}
-                className="input"
-                placeholder="https://..."
-              />
+
+            {/* 콘텐츠 목록 편집 */}
+            <div className="space-y-2">
+              {contents.map((c, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <select
+                    value={c.type}
+                    onChange={(e) =>
+                      setContents((prev) =>
+                        prev.map((item, idx) =>
+                          idx === i
+                            ? { ...item, type: e.target.value as ContentType }
+                            : item
+                        )
+                      )
+                    }
+                    className="input text-sm w-28 shrink-0"
+                  >
+                    {CONTENT_TYPE_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="url"
+                    value={c.url}
+                    onChange={(e) =>
+                      setContents((prev) =>
+                        prev.map((item, idx) =>
+                          idx === i ? { ...item, url: e.target.value } : item
+                        )
+                      )
+                    }
+                    className="input text-sm flex-1"
+                    placeholder="https://..."
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setContents((prev) => prev.filter((_, idx) => idx !== i))
+                    }
+                    className="p-2 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+                    title="삭제"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setContents((prev) => [...prev, { type: "reels", url: "" }]);
+                  // 첫 콘텐츠 추가 시 업로드 완료 자동 체크
+                  if (contents.length === 0 && !formData.is_uploaded) {
+                    setFormData((prev) => ({ ...prev, is_uploaded: true }));
+                  }
+                }}
+                className="btn-secondary btn-sm"
+              >
+                + 콘텐츠 추가
+              </button>
             </div>
           </div>
 
@@ -572,9 +648,74 @@ export default function InfluencerModal({
                 value={formData.settlement_method}
                 onChange={handleChange}
                 className="input"
-                placeholder="예: 계좌이체, 현금"
+                placeholder="예: 계좌이체, 해외송금 (SWIFT), PayPal"
+                list="settlement-method-suggestions"
               />
+              <datalist id="settlement-method-suggestions">
+                {SETTLEMENT_METHOD_SUGGESTIONS.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
             </div>
+
+            {/* 정산 계좌 정보 (인플루언서 마스터에서 관리) */}
+            {(() => {
+              const bankInf = record?.influencer ?? selectedInfluencer;
+              if (!bankInf) return null;
+              return hasBankDetails(bankInf) ? (
+                <div className="bg-white rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs font-semibold text-gray-600 mb-2">
+                    정산 계좌 정보 (Bank Account Details)
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                    <div>
+                      <span className="text-gray-400">예금주</span>{" "}
+                      <span className="text-gray-900 font-medium">{bankInf.bank_account_holder}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">은행</span>{" "}
+                      <span className="text-gray-900 font-medium">{bankInf.bank_name}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">계좌번호</span>{" "}
+                      <span className="text-gray-900 font-medium">{bankInf.bank_account_number}</span>
+                    </div>
+                    {bankInf.bank_account_type && (
+                      <div>
+                        <span className="text-gray-400">계좌 유형</span>{" "}
+                        <span className="text-gray-900">{bankInf.bank_account_type}</span>
+                      </div>
+                    )}
+                    {bankInf.bank_swift_code && (
+                      <div>
+                        <span className="text-gray-400">SWIFT/BIC</span>{" "}
+                        <span className="text-gray-900">{bankInf.bank_swift_code}</span>
+                      </div>
+                    )}
+                    {bankInf.bank_email && (
+                      <div>
+                        <span className="text-gray-400">이메일</span>{" "}
+                        <span className="text-gray-900">{bankInf.bank_email}</span>
+                      </div>
+                    )}
+                    {bankInf.bank_address && (
+                      <div className="col-span-2">
+                        <span className="text-gray-400">주소</span>{" "}
+                        <span className="text-gray-900">{bankInf.bank_address}</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    계좌 정보 수정은 인플루언서 관리 메뉴에서 가능합니다.
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2.5 text-xs text-orange-700">
+                  ⚠ 이 인플루언서의 정산 계좌 정보가 미등록 상태입니다.
+                  인플루언서 관리 메뉴에서 등록해주세요.
+                </div>
+              );
+            })()}
             <div className="flex items-center gap-3">
               <input
                 type="checkbox"

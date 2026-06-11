@@ -7,6 +7,7 @@ import {
   Influencer,
   getProgressStatus,
   STATUS_COLORS,
+  hasBankDetails,
 } from "@/types/database";
 import { formatDate } from "@/lib/utils";
 
@@ -80,6 +81,13 @@ export default function SettlementTable({
       "정산여부",
       "정산일",
       "진행상태",
+      "예금주(Account Holder)",
+      "은행명(Bank Name)",
+      "계좌번호(Account Number)",
+      "계좌유형(Account Type)",
+      "SWIFT/BIC",
+      "이메일",
+      "주소",
       "메모",
     ];
     const rows = filtered.map(({ r, status }) => [
@@ -94,6 +102,13 @@ export default function SettlementTable({
       r.is_settled ? "Y" : "N",
       r.settled_date ?? "",
       status,
+      r.influencer.bank_account_holder ?? "",
+      r.influencer.bank_name ?? "",
+      r.influencer.bank_account_number ?? "",
+      r.influencer.bank_account_type ?? "",
+      r.influencer.bank_swift_code ?? "",
+      r.influencer.bank_email ?? "",
+      r.influencer.bank_address ?? "",
       r.notes ?? "",
     ]);
     const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
@@ -182,6 +197,7 @@ export default function SettlementTable({
                 <th className="table-header text-right">판매액</th>
                 <th className="table-header text-right">정산금액</th>
                 <th className="table-header hidden md:table-cell">정산방식</th>
+                <th className="table-header hidden md:table-cell">계좌정보</th>
                 <th className="table-header">상태</th>
                 <th className="table-header hidden md:table-cell">정산일</th>
               </tr>
@@ -189,7 +205,7 @@ export default function SettlementTable({
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center text-gray-400 text-sm">
+                  <td colSpan={9} className="py-16 text-center text-gray-400 text-sm">
                     조건에 맞는 정산 건이 없습니다.
                   </td>
                 </tr>
@@ -220,6 +236,20 @@ export default function SettlementTable({
                     </td>
                     <td className="table-cell text-gray-500 text-xs hidden md:table-cell">
                       {r.settlement_method || "-"}
+                    </td>
+                    <td className="table-cell hidden md:table-cell">
+                      {hasBankDetails(r.influencer) ? (
+                        <span
+                          className="text-xs text-gray-600"
+                          title={`${r.influencer.bank_account_holder} · ${r.influencer.bank_name} ${r.influencer.bank_account_number}${r.influencer.bank_swift_code ? ` · SWIFT ${r.influencer.bank_swift_code}` : ""}`}
+                        >
+                          {r.influencer.bank_name} {r.influencer.bank_account_number}
+                        </span>
+                      ) : (
+                        <span className="badge bg-orange-100 text-orange-700 text-xs">
+                          미등록
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       <span className={`badge ${STATUS_COLORS[status]}`}>

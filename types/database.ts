@@ -60,11 +60,49 @@ export interface Influencer {
   id: string;
   name: string;
   account_url: string | null;
+  bank_account_holder: string | null;
+  bank_account_type: string | null;
+  bank_swift_code: string | null;
+  bank_account_number: string | null;
+  bank_email: string | null;
+  bank_name: string | null;
+  bank_address: string | null;
   created_at: string;
+}
+
+/** 정산 계좌 정보가 입력되어 있는지 (핵심 필드 기준) */
+export function hasBankDetails(inf: Influencer): boolean {
+  return Boolean(inf.bank_account_holder && inf.bank_account_number && inf.bank_name);
 }
 
 export type InfluencerInsert = Omit<Influencer, "id" | "created_at">;
 export type InfluencerUpdate = Partial<InfluencerInsert>;
+
+export type ContentType =
+  | "reels"
+  | "story"
+  | "thread"
+  | "feed"
+  | "youtube"
+  | "tiktok"
+  | "blog"
+  | "other";
+
+export interface ContentItem {
+  type: ContentType;
+  url: string;
+}
+
+export const CONTENT_TYPE_LABEL: Record<ContentType, string> = {
+  reels: "릴스",
+  story: "스토리",
+  thread: "쓰레드",
+  feed: "피드",
+  youtube: "유튜브",
+  tiktok: "틱톡",
+  blog: "블로그",
+  other: "기타",
+};
 
 export interface CampaignInfluencer {
   id: string;
@@ -75,6 +113,7 @@ export interface CampaignInfluencer {
   is_product_sent: boolean;
   sent_date: string | null;
   content_url: string | null;
+  contents: ContentItem[] | null;
   is_uploaded: boolean;
   sales_amount: number;
   quantity: number;

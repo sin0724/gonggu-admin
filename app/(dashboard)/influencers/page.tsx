@@ -2,8 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Influencer } from "@/types/database";
+import { Influencer, hasBankDetails } from "@/types/database";
 import { formatDate, formatCurrency } from "@/lib/utils";
+
+const EMPTY_BANK = {
+  bank_account_holder: "",
+  bank_account_type: "",
+  bank_swift_code: "",
+  bank_account_number: "",
+  bank_email: "",
+  bank_name: "",
+  bank_address: "",
+};
 
 interface InfluencerStats {
   campaignCount: number;
@@ -31,6 +41,7 @@ export default function InfluencersPage() {
   const [editTarget, setEditTarget] = useState<Influencer | null>(null);
   const [name, setName] = useState("");
   const [accountUrl, setAccountUrl] = useState("");
+  const [bank, setBank] = useState({ ...EMPTY_BANK });
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -110,6 +121,7 @@ export default function InfluencersPage() {
     setEditTarget(null);
     setName("");
     setAccountUrl("");
+    setBank({ ...EMPTY_BANK });
     setShowForm(true);
   };
 
@@ -117,7 +129,21 @@ export default function InfluencersPage() {
     setEditTarget(inf);
     setName(inf.name);
     setAccountUrl(inf.account_url ?? "");
+    setBank({
+      bank_account_holder: inf.bank_account_holder ?? "",
+      bank_account_type: inf.bank_account_type ?? "",
+      bank_swift_code: inf.bank_swift_code ?? "",
+      bank_account_number: inf.bank_account_number ?? "",
+      bank_email: inf.bank_email ?? "",
+      bank_name: inf.bank_name ?? "",
+      bank_address: inf.bank_address ?? "",
+    });
     setShowForm(true);
+  };
+
+  const handleBankChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name: field, value } = e.target;
+    setBank((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -125,15 +151,22 @@ export default function InfluencersPage() {
     setSaving(true);
     const supabase = createClient();
 
+    const payload = {
+      name,
+      account_url: accountUrl || null,
+      bank_account_holder: bank.bank_account_holder || null,
+      bank_account_type: bank.bank_account_type || null,
+      bank_swift_code: bank.bank_swift_code || null,
+      bank_account_number: bank.bank_account_number || null,
+      bank_email: bank.bank_email || null,
+      bank_name: bank.bank_name || null,
+      bank_address: bank.bank_address || null,
+    };
+
     if (editTarget) {
-      await supabase
-        .from("influencers")
-        .update({ name, account_url: accountUrl || null })
-        .eq("id", editTarget.id);
+      await supabase.from("influencers").update(payload).eq("id", editTarget.id);
     } else {
-      await supabase
-        .from("influencers")
-        .insert({ name, account_url: accountUrl || null });
+      await supabase.from("influencers").insert(payload);
     }
 
     await fetchInfluencers();
@@ -209,6 +242,7 @@ export default function InfluencersPage() {
                 <tr>
                   <th className="table-header">이름</th>
                   <th className="table-header hidden md:table-cell">계정 URL</th>
+                  <th className="table-header hidden md:table-cell">계좌정보</th>
                   <th className="table-header">참여 캠페인</th>
                   <th className="table-header hidden md:table-cell">누적 판매액</th>
                   <th className="table-header hidden md:table-cell">누적 정산금액</th>
@@ -220,7 +254,7 @@ export default function InfluencersPage() {
               <tbody className="divide-y divide-gray-100">
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-gray-400 text-sm">
+                    <td colSpan={9} className="py-16 text-center text-gray-400 text-sm">
                       {search ? "검색 결과가 없습니다." : "등록된 인플루언서가 없습니다."}
                     </td>
                   </tr>
@@ -259,6 +293,13 @@ export default function InfluencersPage() {
                               </a>
                             ) : (
                               <span className="text-gray-400">-</span>
+                            )}
+                          </td>
+                          <td className="table-cell hidden md:table-cell">
+                            {hasBankDetails(inf) ? (
+                              <span className="badge bg-green-100 text-green-700">등록됨</span>
+                            ) : (
+                              <span className="badge bg-gray-100 text-gray-500">미등록</span>
                             )}
                           </td>
                           <td className="table-cell text-center">
@@ -305,7 +346,7 @@ export default function InfluencersPage() {
                         {/* 아코디언: 캠페인 참여 이력 */}
                         {isExpanded && (
                           <tr key={`${inf.id}-accordion`}>
-                            <td colSpan={8} className="bg-blue-50 px-6 py-3">
+                            <td colSpan={9} className="bg-blue-50 px-6 py-3">
                               {!stats || stats.campaigns.length === 0 ? (
                                 <p className="text-sm text-gray-400 py-2">참여한 캠페인이 없습니다.</p>
                               ) : (
@@ -360,7 +401,7 @@ export default function InfluencersPage() {
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setShowForm(false)}
           />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-gray-900">
                 {editTarget ? "인플루언서 수정" : "인플루언서 등록"}
@@ -399,6 +440,96 @@ export default function InfluencersPage() {
                   placeholder="https://instagram.com/..."
                 />
               </div>
+
+              {/* 정산 계좌 정보 */}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-gray-700">
+                  정산 계좌 정보{" "}
+                  <span className="text-xs font-normal text-gray-400">
+                    (Bank Account Details — 정산 시 자동 표시)
+                  </span>
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label text-xs">예금주 (Account Holder)</label>
+                    <input
+                      type="text"
+                      name="bank_account_holder"
+                      value={bank.bank_account_holder}
+                      onChange={handleBankChange}
+                      className="input text-sm"
+                      placeholder="예: HONG GILDONG"
+                    />
+                  </div>
+                  <div>
+                    <label className="label text-xs">계좌 유형 (Account Type)</label>
+                    <input
+                      type="text"
+                      name="bank_account_type"
+                      value={bank.bank_account_type}
+                      onChange={handleBankChange}
+                      className="input text-sm"
+                      placeholder="예: Checking / Savings"
+                    />
+                  </div>
+                  <div>
+                    <label className="label text-xs">은행명 (Bank Name)</label>
+                    <input
+                      type="text"
+                      name="bank_name"
+                      value={bank.bank_name}
+                      onChange={handleBankChange}
+                      className="input text-sm"
+                      placeholder="예: 국민은행 / Bank of America"
+                    />
+                  </div>
+                  <div>
+                    <label className="label text-xs">계좌번호 (Account Number)</label>
+                    <input
+                      type="text"
+                      name="bank_account_number"
+                      value={bank.bank_account_number}
+                      onChange={handleBankChange}
+                      className="input text-sm"
+                      placeholder="계좌번호 / IBAN"
+                    />
+                  </div>
+                  <div>
+                    <label className="label text-xs">SWIFT / BIC Code</label>
+                    <input
+                      type="text"
+                      name="bank_swift_code"
+                      value={bank.bank_swift_code}
+                      onChange={handleBankChange}
+                      className="input text-sm"
+                      placeholder="해외 송금 시 (예: CZNBKRSE)"
+                    />
+                  </div>
+                  <div>
+                    <label className="label text-xs">이메일 (Email)</label>
+                    <input
+                      type="email"
+                      name="bank_email"
+                      value={bank.bank_email}
+                      onChange={handleBankChange}
+                      className="input text-sm"
+                      placeholder="정산 연락용 이메일"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="label text-xs">주소 (Address)</label>
+                    <input
+                      type="text"
+                      name="bank_address"
+                      value={bank.bank_address}
+                      onChange={handleBankChange}
+                      className="input text-sm"
+                      placeholder="해외 송금 시 수취인 주소"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"

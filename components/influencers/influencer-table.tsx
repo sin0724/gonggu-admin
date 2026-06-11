@@ -8,6 +8,7 @@ import {
   ProgressStatus,
   getProgressStatus,
   STATUS_COLORS,
+  CONTENT_TYPE_LABEL,
 } from "@/types/database";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import InfluencerModal from "./influencer-modal";
@@ -148,10 +149,9 @@ export default function InfluencerTable({
       "인플루언서명",
       "계정링크",
       "구매링크",
-      "주문시트링크",
       "발송여부",
       "발송일",
-      "콘텐츠URL",
+      "콘텐츠",
       "업로드여부",
       "판매액",
       "판매수량",
@@ -165,14 +165,19 @@ export default function InfluencerTable({
 
     const rows = filtered.map((r) => {
       const status = getProgressStatus(r);
+      const contentList =
+        r.contents && r.contents.length > 0
+          ? r.contents
+              .map((c) => `${CONTENT_TYPE_LABEL[c.type] ?? c.type}: ${c.url}`)
+              .join(" | ")
+          : r.content_url ?? "";
       return [
         r.influencer.name,
         r.influencer.account_url ?? "",
         r.purchase_url || campaignPurchaseFormUrl || "",
-        r.sheet_url ?? "",
         r.is_product_sent ? "Y" : "N",
         r.sent_date ?? "",
-        r.content_url ?? "",
+        contentList,
         r.is_uploaded ? "Y" : "N",
         r.sales_amount?.toString() ?? "0",
         r.quantity?.toString() ?? "0",
@@ -290,7 +295,6 @@ export default function InfluencerTable({
                 <tr>
                   <th className="table-header">인플루언서</th>
                   <th className="table-header hidden md:table-cell">구매링크</th>
-                  <th className="table-header hidden md:table-cell">시트</th>
                   <th className="table-header">진행상태</th>
                   <th className="table-header hidden md:table-cell">발송일</th>
                   <th className="table-header hidden md:table-cell">콘텐츠</th>
@@ -309,7 +313,7 @@ export default function InfluencerTable({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={15}
+                      colSpan={14}
                       className="py-16 text-center text-gray-400 text-sm"
                     >
                       {search || statusFilter !== "전체"
@@ -357,16 +361,6 @@ export default function InfluencerTable({
                             <span className="text-gray-300 text-xs">-</span>
                           )}
                         </td>
-                        <td className="table-cell hidden md:table-cell">
-                          {r.sheet_url ? (
-                            <a href={r.sheet_url} target="_blank" rel="noopener noreferrer"
-                              className="text-primary-600 hover:underline text-xs">
-                              시트
-                            </a>
-                          ) : (
-                            <span className="text-gray-300 text-xs">-</span>
-                          )}
-                        </td>
                         <td className="table-cell">
                           <span className={`badge ${STATUS_COLORS[status]}`}>
                             {status}
@@ -376,7 +370,21 @@ export default function InfluencerTable({
                           {formatDate(r.sent_date)}
                         </td>
                         <td className="table-cell hidden md:table-cell">
-                          {r.content_url ? (
+                          {r.contents && r.contents.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 max-w-[140px]">
+                              {r.contents.map((c, i) => (
+                                <a
+                                  key={i}
+                                  href={c.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 whitespace-nowrap"
+                                >
+                                  {CONTENT_TYPE_LABEL[c.type] ?? c.type}
+                                </a>
+                              ))}
+                            </div>
+                          ) : r.content_url ? (
                             <a
                               href={r.content_url}
                               target="_blank"

@@ -362,7 +362,12 @@ export default function InfluencerModal({
             {/* UTM 빌더 */}
             {campaignPurchaseFormUrl && (
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-semibold text-blue-700">UTM 링크 빌더</p>
+                <p className="text-xs font-semibold text-blue-700">
+                  UTM 링크 빌더{" "}
+                  <span className="font-normal text-blue-400">
+                    — 캠페인 공통 구매 링크 기준
+                  </span>
+                </p>
                 <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-1">
                     <label className="label text-xs">유입 채널</label>
@@ -425,6 +430,11 @@ export default function InfluencerModal({
                 className="input"
                 placeholder="https://..."
               />
+              <p className="text-xs text-gray-400 mt-1">
+                {campaignPurchaseFormUrl
+                  ? "비워두면 캠페인 공통 구매 링크가 적용됩니다."
+                  : "이 KOL 전용 구매 링크 (캠페인 공통 링크가 없는 경우 필수)"}
+              </p>
             </div>
             <div>
               <label className="label">주문 시트 링크 <span className="text-gray-400 font-normal text-xs">(선택)</span></label>

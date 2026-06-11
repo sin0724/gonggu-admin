@@ -73,7 +73,6 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     start_date: campaign?.start_date ?? "",
     end_date: campaign?.end_date ?? "",
     purchase_form_url: campaign?.purchase_form_url ?? "",
-    response_sheet_url: campaign?.response_sheet_url ?? "",
     drive_url: campaign?.drive_url ?? "",
   });
 
@@ -221,7 +220,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
         purchase_form_url: formData.purchase_form_url || null,
-        response_sheet_url: formData.response_sheet_url || null,
+        // 응답 시트는 더 이상 사용하지 않음 — 기존 값만 보존
+        response_sheet_url: campaign?.response_sheet_url ?? null,
         drive_url: formData.drive_url || null,
       };
 
@@ -1219,7 +1219,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         </h2>
         <div className="space-y-5">
           <div>
-            <label className="label">구매 양식 링크</label>
+            <label className="label">공통 구매 링크</label>
             <input
               type="url"
               name="purchase_form_url"
@@ -1228,23 +1228,14 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               className="input"
               placeholder="https://..."
             />
-          </div>
-          <div>
-            <label className="label">응답 시트 링크</label>
-            <input
-              type="url"
-              name="response_sheet_url"
-              value={formData.response_sheet_url}
-              onChange={handleChange}
-              className="input"
-              placeholder="https://docs.google.com/spreadsheets/..."
-            />
             <p className="text-xs text-gray-400 mt-1">
-              구매 양식과 연동된 Google Sheets
+              캠페인 전체가 하나의 구매 링크를 쓰는 경우 입력하세요. KOL별로
+              링크가 다르면 비워두고 인플루언서별 구매링크에 입력하면 됩니다
+              (개별 링크가 있으면 개별 링크가 우선).
             </p>
           </div>
           <div>
-            <label className="label">구글 드라이브 링크</label>
+            <label className="label">KOL 가이드 (구글 드라이브)</label>
             <input
               type="url"
               name="drive_url"
@@ -1253,6 +1244,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               className="input"
               placeholder="https://drive.google.com/..."
             />
+            <p className="text-xs text-gray-400 mt-1">
+              KOL에게 보낼 가이드 문서 링크
+            </p>
           </div>
         </div>
       </div>

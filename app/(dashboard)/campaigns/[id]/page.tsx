@@ -174,16 +174,7 @@ export default async function CampaignDetailPage({
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
-              구매 양식
-            </a>
-          )}
-          {campaign.response_sheet_url && (
-            <a href={campaign.response_sheet_url} target="_blank" rel="noopener noreferrer"
-              className="flex items-center gap-1 text-primary-600 hover:text-primary-700">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-              응답 시트
+              공통 구매 링크
             </a>
           )}
           {campaign.drive_url && (
@@ -192,7 +183,7 @@ export default async function CampaignDetailPage({
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
-              구글 드라이브
+              KOL 가이드
             </a>
           )}
         </div>

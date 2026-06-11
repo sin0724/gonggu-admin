@@ -168,7 +168,7 @@ export default function InfluencerTable({
       return [
         r.influencer.name,
         r.influencer.account_url ?? "",
-        r.purchase_url ?? "",
+        r.purchase_url || campaignPurchaseFormUrl || "",
         r.sheet_url ?? "",
         r.is_product_sent ? "Y" : "N",
         r.sent_date ?? "",
@@ -346,7 +346,12 @@ export default function InfluencerTable({
                           {r.purchase_url ? (
                             <a href={r.purchase_url} target="_blank" rel="noopener noreferrer"
                               className="text-primary-600 hover:underline text-xs">
-                              링크
+                              개별 링크
+                            </a>
+                          ) : campaignPurchaseFormUrl ? (
+                            <a href={campaignPurchaseFormUrl} target="_blank" rel="noopener noreferrer"
+                              className="text-gray-500 hover:underline text-xs">
+                              공통 링크
                             </a>
                           ) : (
                             <span className="text-gray-300 text-xs">-</span>

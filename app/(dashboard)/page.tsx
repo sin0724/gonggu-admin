@@ -28,16 +28,73 @@ export default async function DashboardPage() {
       .length ?? 0;
   const endedCampaigns = totalCampaigns - activeCampaigns;
 
-  const pendingSettlement =
-    campaignInfluencers?.filter((ci) => {
-      const status = getProgressStatus(ci);
-      return status === "정산대기";
-    }).length ?? 0;
+  const pendingList =
+    campaignInfluencers?.filter((ci) => getProgressStatus(ci) === "정산대기") ??
+    [];
+  const pendingSettlement = pendingList.length;
+  const pendingSettlementAmount = pendingList.reduce(
+    (sum, ci) => sum + (ci.settlement_amount || 0),
+    0
+  );
 
   const completedSettlement =
     campaignInfluencers?.filter((ci) => ci.is_settled).length ?? 0;
 
+  // 돈 지표 — 벤더사 마진 = 판매액 × 캠페인 벤더수수료%
+  const vendorRateByCampaign = new Map(
+    (campaigns ?? []).map((c) => [c.id, c.vendor_fee_rate ?? 0])
+  );
+  const totalSales =
+    campaignInfluencers?.reduce((sum, ci) => sum + (ci.sales_amount || 0), 0) ??
+    0;
+  const totalVendorMargin =
+    campaignInfluencers?.reduce(
+      (sum, ci) =>
+        sum +
+        (ci.sales_amount || 0) *
+          ((vendorRateByCampaign.get(ci.campaign_id) ?? 0) / 100),
+      0
+    ) ?? 0;
+  const totalKolPaid =
+    campaignInfluencers
+      ?.filter((ci) => ci.is_settled)
+      .reduce((sum, ci) => sum + (ci.settlement_amount || 0), 0) ?? 0;
+
   const recentCampaigns = campaigns?.slice(0, 5) ?? [];
+
+  const fmtWon = (n: number) =>
+    `${Math.round(n).toLocaleString("ko-KR")}원`;
+
+  const moneyStats = [
+    {
+      label: "총 판매액",
+      value: fmtWon(totalSales),
+      sub: "전체 캠페인 누적",
+      color: "bg-gray-50 text-gray-600",
+      href: "/campaigns",
+    },
+    {
+      label: "벤더사 누적 마진",
+      value: fmtWon(totalVendorMargin),
+      sub: "판매액 × 캠페인별 벤더 %",
+      color: "bg-blue-50 text-blue-600",
+      href: "/campaigns",
+    },
+    {
+      label: "정산 대기 금액",
+      value: fmtWon(pendingSettlementAmount),
+      sub: `${pendingSettlement}건 — KOL 지급 예정`,
+      color: "bg-orange-50 text-orange-600",
+      href: "/settlements",
+    },
+    {
+      label: "KOL 지급 완료",
+      value: fmtWon(totalKolPaid),
+      sub: `${completedSettlement}건 정산 완료`,
+      color: "bg-green-50 text-green-600",
+      href: "/settlements",
+    },
+  ];
 
   const stats = [
     {
@@ -105,6 +162,23 @@ export default async function DashboardPage() {
               </div>
             </div>
           </div>
+        ))}
+      </div>
+
+      {/* 돈 지표 카드 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {moneyStats.map((stat) => (
+          <Link
+            key={stat.label}
+            href={stat.href}
+            className="card p-5 hover:shadow-md transition-shadow"
+          >
+            <div className={`inline-block text-xs font-medium px-2 py-1 rounded-md mb-2 ${stat.color}`}>
+              {stat.label}
+            </div>
+            <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+            <p className="text-xs text-gray-400 mt-1">{stat.sub}</p>
+          </Link>
         ))}
       </div>
 

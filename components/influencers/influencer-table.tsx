@@ -97,17 +97,28 @@ export default function InfluencerTable({
   };
 
   const handleToggleCheckbox = async (
-    id: string,
-    field: CheckboxField,
-    currentValue: boolean
+    record: CampaignInfluencerWithDetails,
+    field: CheckboxField
   ) => {
-    setTogglingId(id + field);
+    const currentValue = record[field];
+    setTogglingId(record.id + field);
     try {
       const supabase = createClient();
+      const today = new Date().toISOString().slice(0, 10);
+      const payload: Record<string, boolean | string | null> = {
+        [field]: !currentValue,
+      };
+      // 체크 시 날짜 자동 기록, 해제 시 날짜 제거
+      if (field === "is_product_sent") {
+        payload.sent_date = !currentValue ? record.sent_date || today : null;
+      }
+      if (field === "is_settled") {
+        payload.settled_date = !currentValue ? record.settled_date || today : null;
+      }
       const { error } = await supabase
         .from("campaign_influencers")
-        .update({ [field]: !currentValue })
-        .eq("id", id);
+        .update(payload)
+        .eq("id", record.id);
       if (error) throw error;
       router.refresh();
     } catch {
@@ -143,6 +154,7 @@ export default function InfluencerTable({
       "콘텐츠URL",
       "업로드여부",
       "판매액",
+      "판매수량",
       "정산방식",
       "정산금액",
       "정산여부",
@@ -163,6 +175,7 @@ export default function InfluencerTable({
         r.content_url ?? "",
         r.is_uploaded ? "Y" : "N",
         r.sales_amount?.toString() ?? "0",
+        r.quantity?.toString() ?? "0",
         r.settlement_method ?? "",
         r.settlement_amount?.toString() ?? "0",
         r.is_settled ? "Y" : "N",
@@ -282,6 +295,7 @@ export default function InfluencerTable({
                   <th className="table-header hidden md:table-cell">발송일</th>
                   <th className="table-header hidden md:table-cell">콘텐츠</th>
                   <th className="table-header hidden md:table-cell">판매금액</th>
+                  <th className="table-header hidden md:table-cell">수량</th>
                   <th className="table-header hidden md:table-cell">정산금액</th>
                   <th className="table-header hidden md:table-cell">정산방법</th>
                   <th className="table-header">발송</th>
@@ -295,7 +309,7 @@ export default function InfluencerTable({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={14}
+                      colSpan={15}
                       className="py-16 text-center text-gray-400 text-sm"
                     >
                       {search || statusFilter !== "전체"
@@ -306,7 +320,6 @@ export default function InfluencerTable({
                 ) : (
                   filtered.map((r) => {
                     const status = getProgressStatus(r);
-                    const isToggling = togglingId !== null;
                     return (
                       <tr
                         key={r.id}
@@ -376,6 +389,9 @@ export default function InfluencerTable({
                             ? formatCurrency(r.sales_amount)
                             : "-"}
                         </td>
+                        <td className="table-cell text-right text-gray-600 hidden md:table-cell">
+                          {r.quantity > 0 ? `${r.quantity}개` : "-"}
+                        </td>
                         <td className="table-cell text-right font-medium text-green-700 hidden md:table-cell">
                           {r.settlement_amount > 0
                             ? formatCurrency(r.settlement_amount)
@@ -389,9 +405,9 @@ export default function InfluencerTable({
                           <input
                             type="checkbox"
                             checked={r.is_product_sent}
-                            disabled={isToggling}
+                            disabled={togglingId === r.id + "is_product_sent"}
                             onChange={() =>
-                              handleToggleCheckbox(r.id, "is_product_sent", r.is_product_sent)
+                              handleToggleCheckbox(r, "is_product_sent")
                             }
                             className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           />
@@ -401,9 +417,9 @@ export default function InfluencerTable({
                           <input
                             type="checkbox"
                             checked={r.is_uploaded}
-                            disabled={isToggling}
+                            disabled={togglingId === r.id + "is_uploaded"}
                             onChange={() =>
-                              handleToggleCheckbox(r.id, "is_uploaded", r.is_uploaded)
+                              handleToggleCheckbox(r, "is_uploaded")
                             }
                             className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           />
@@ -413,9 +429,9 @@ export default function InfluencerTable({
                           <input
                             type="checkbox"
                             checked={r.is_settled}
-                            disabled={isToggling}
+                            disabled={togglingId === r.id + "is_settled"}
                             onChange={() =>
-                              handleToggleCheckbox(r.id, "is_settled", r.is_settled)
+                              handleToggleCheckbox(r, "is_settled")
                             }
                             className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           />

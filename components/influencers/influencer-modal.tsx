@@ -70,6 +70,7 @@ export default function InfluencerModal({
     content_url: record?.content_url ?? "",
     is_uploaded: record?.is_uploaded ?? false,
     sales_amount: record?.sales_amount?.toString() ?? "0",
+    quantity: record?.quantity?.toString() ?? "0",
     settlement_method: record?.settlement_method ?? "",
     settlement_amount: record?.settlement_amount?.toString() ?? "0",
     is_settled: record?.is_settled ?? false,
@@ -195,6 +196,7 @@ export default function InfluencerModal({
         content_url: formData.content_url || null,
         is_uploaded: formData.is_uploaded,
         sales_amount: parseFloat(formData.sales_amount) || 0,
+        quantity: parseInt(formData.quantity, 10) || 0,
         settlement_method: formData.settlement_method || null,
         settlement_amount: parseFloat(formData.settlement_amount) || 0,
         is_settled: formData.is_settled,
@@ -504,7 +506,7 @@ export default function InfluencerModal({
                 캠페인 RS율 {campaignInfluencerRsRate}% 적용 — 판매액 입력 시 정산금액 자동계산
               </p>
             )}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="label">판매금액 (원)</label>
                 <input
@@ -516,6 +518,21 @@ export default function InfluencerModal({
                   min="0"
                   step="1"
                 />
+              </div>
+              <div>
+                <label className="label">판매수량 (개)</label>
+                <input
+                  type="number"
+                  name="quantity"
+                  value={formData.quantity}
+                  onChange={handleChange}
+                  className="input"
+                  min="0"
+                  step="1"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  클라이언트 마진 계산에 사용
+                </p>
               </div>
               <div>
                 <label className="label flex items-center gap-2">

@@ -35,16 +35,35 @@ export default async function CampaignDetailPage({
 
   const vendorFeeRate = campaign.vendor_fee_rate ?? 0;
   const influencerRsRate = campaign.influencer_rs_rate ?? 0;
+  const supplyPrice = campaign.supply_price ?? 0;
+  const sellerShippingFee =
+    campaign.shipping_payer === "seller" ? campaign.shipping_fee ?? 0 : 0;
 
   const formatCurrency = (n: number) =>
     n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 
-  // KPI 계산
+  // KPI 계산 — 돈 흐름 모델: 벤더사 마진 = 판매액 × 벤더%, KOL은 실제 정산금액 기준
   const totalSales = records.reduce((sum, r) => sum + (r.sales_amount || 0), 0);
   const totalSettlement = records.reduce((sum, r) => sum + (r.settlement_amount || 0), 0);
-  const totalVendorFee = totalSales * (vendorFeeRate / 100);
-  const totalInfluencerRs = totalSales * (influencerRsRate / 100);
-  const totalBrandProfit = totalSales - totalVendorFee - totalInfluencerRs;
+  const totalVendorMargin = totalSales * (vendorFeeRate / 100);
+  const totalKolRs = totalSettlement > 0 ? totalSettlement : totalSales * (influencerRsRate / 100);
+  const clientGross = totalSales - totalVendorMargin - totalKolRs;
+
+  // 판매 수량 (직접 입력 합계, 없으면 공구가로 추정)
+  const inputQuantity = records.reduce((sum, r) => sum + (r.quantity || 0), 0);
+  const estimatedQuantity =
+    campaign.gonggu_price && campaign.gonggu_price > 0
+      ? Math.round(totalSales / campaign.gonggu_price)
+      : 0;
+  const quantity = inputQuantity > 0 ? inputQuantity : estimatedQuantity;
+  const isQuantityEstimated = inputQuantity === 0 && estimatedQuantity > 0;
+
+  // 클라이언트 마진 = 정산액 − 원가(수량×공급가) − 판매자부담 배송비
+  const clientMargin =
+    supplyPrice > 0 && quantity > 0
+      ? clientGross - quantity * supplyPrice - quantity * sellerShippingFee
+      : null;
+
   const notUploadedCount = records.filter((r) => r.is_product_sent && !r.is_uploaded).length;
   const notSettledCount = records.filter((r) => r.is_uploaded && !r.is_settled).length;
 
@@ -70,12 +89,20 @@ export default async function CampaignDetailPage({
             </div>
             <p className="text-sm text-gray-500">{campaign.client_name}</p>
           </div>
-          <Link href={`/campaigns/${id}/edit`} className="btn-secondary">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-            수정
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href={`/campaigns/${id}/proposal`} className="btn-secondary">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              클라이언트 제안서
+            </Link>
+            <Link href={`/campaigns/${id}/edit`} className="btn-secondary">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              수정
+            </Link>
+          </div>
         </div>
 
         {/* 메타 정보 행 */}
@@ -107,9 +134,15 @@ export default async function CampaignDetailPage({
               )}
               공구가 {formatCurrency(campaign.gonggu_price)}원
               <span className="text-gray-300">|</span>
-              <span className="text-blue-600 font-medium">밴더 {vendorFeeRate}%</span>
+              <span className="text-blue-600 font-medium">벤더 {vendorFeeRate}%</span>
               <span className="text-gray-300">|</span>
-              <span>RS {influencerRsRate}%</span>
+              <span>KOL RS {influencerRsRate}%</span>
+              {campaign.total_rs_rate && (
+                <>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-gray-500">승인 총 RS {campaign.total_rs_rate}%</span>
+                </>
+              )}
             </div>
           )}
 
@@ -157,27 +190,47 @@ export default async function CampaignDetailPage({
           <div className="card p-4 col-span-1 md:col-span-1">
             <p className="text-xs text-gray-400 mb-1">총 판매액</p>
             <p className="text-xl font-bold text-gray-900">{formatCurrency(totalSales)}<span className="text-xs font-normal text-gray-400 ml-0.5">원</span></p>
+            {quantity > 0 && (
+              <p className="text-xs text-gray-400 mt-0.5">
+                {formatCurrency(quantity)}개{isQuantityEstimated && " (추정)"}
+              </p>
+            )}
           </div>
 
-          {/* 밴더 수수료 - 가장 중요 */}
+          {/* 벤더사 마진 - 가장 중요 */}
           <div className="card p-4 border-blue-200 bg-blue-50 col-span-1">
-            <p className="text-xs text-blue-500 font-medium mb-1">밴더사 수수료</p>
-            <p className="text-xl font-bold text-blue-700">{formatCurrency(totalVendorFee)}<span className="text-xs font-normal text-blue-400 ml-0.5">원</span></p>
-            <p className="text-xs text-blue-400 mt-0.5">{vendorFeeRate}%</p>
+            <p className="text-xs text-blue-500 font-medium mb-1">벤더사 마진 (우리)</p>
+            <p className="text-xl font-bold text-blue-700">{formatCurrency(totalVendorMargin)}<span className="text-xs font-normal text-blue-400 ml-0.5">원</span></p>
+            <p className="text-xs text-blue-400 mt-0.5">판매액 × {vendorFeeRate}%</p>
           </div>
 
-          {/* 인플루언서 RS */}
+          {/* KOL RS 지급액 */}
           <div className="card p-4">
-            <p className="text-xs text-gray-400 mb-1">인플루언서 RS</p>
-            <p className="text-xl font-bold text-gray-700">{formatCurrency(totalInfluencerRs)}<span className="text-xs font-normal text-gray-400 ml-0.5">원</span></p>
-            <p className="text-xs text-gray-400 mt-0.5">{influencerRsRate}%</p>
+            <p className="text-xs text-gray-400 mb-1">KOL RS 지급액</p>
+            <p className="text-xl font-bold text-purple-600">{formatCurrency(totalKolRs)}<span className="text-xs font-normal text-gray-400 ml-0.5">원</span></p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {totalSettlement > 0 ? "실제 정산액 기준" : `판매액 × ${influencerRsRate}%`}
+            </p>
           </div>
 
-          {/* 브랜드 수익 */}
+          {/* 클라이언트 마진 */}
           <div className="card p-4 border-green-200 bg-green-50">
-            <p className="text-xs text-green-500 font-medium mb-1">브랜드 수익</p>
-            <p className="text-xl font-bold text-green-700">{formatCurrency(totalBrandProfit)}<span className="text-xs font-normal text-green-400 ml-0.5">원</span></p>
-            <p className="text-xs text-green-400 mt-0.5">{totalSales > 0 ? ((totalBrandProfit / totalSales) * 100).toFixed(1) : 0}%</p>
+            <p className="text-xs text-green-500 font-medium mb-1">클라이언트 마진</p>
+            {clientMargin !== null ? (
+              <>
+                <p className={`text-xl font-bold ${clientMargin >= 0 ? "text-green-700" : "text-red-600"}`}>
+                  {formatCurrency(clientMargin)}<span className="text-xs font-normal text-green-400 ml-0.5">원</span>
+                </p>
+                <p className="text-xs text-green-400 mt-0.5">
+                  RS·원가{sellerShippingFee > 0 ? "·배송비" : ""} 차감 후{isQuantityEstimated && " · 수량 추정"}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xl font-bold text-green-700">{formatCurrency(clientGross)}<span className="text-xs font-normal text-green-400 ml-0.5">원</span></p>
+                <p className="text-xs text-green-400 mt-0.5">RS 차감 후 (공급가 미입력 → 원가 미반영)</p>
+              </>
+            )}
           </div>
 
           {/* 미업로드 */}

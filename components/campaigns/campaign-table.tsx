@@ -17,6 +17,9 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
+  const [statusFilter, setStatusFilter] = useState<"전체" | "진행중" | "종료">(
+    "전체"
+  );
 
   useEffect(() => {
     const saved = localStorage.getItem("campaignViewMode");
@@ -28,11 +31,25 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
     localStorage.setItem("campaignViewMode", mode);
   };
 
-  const filtered = campaigns.filter(
-    (c) =>
+  const activeCount = campaigns.filter((c) =>
+    isCampaignActive(c.start_date, c.end_date)
+  ).length;
+  const statusCounts = {
+    전체: campaigns.length,
+    진행중: activeCount,
+    종료: campaigns.length - activeCount,
+  };
+
+  const filtered = campaigns.filter((c) => {
+    const matchSearch =
       c.campaign_name.toLowerCase().includes(search.toLowerCase()) ||
-      c.client_name.toLowerCase().includes(search.toLowerCase())
-  );
+      c.client_name.toLowerCase().includes(search.toLowerCase());
+    const active = isCampaignActive(c.start_date, c.end_date);
+    const matchStatus =
+      statusFilter === "전체" ||
+      (statusFilter === "진행중" ? active : !active);
+    return matchSearch && matchStatus;
+  });
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`"${name}" 캠페인을 삭제하시겠습니까?\n관련된 모든 인플루언서 데이터도 함께 삭제됩니다.`)) return;
@@ -61,12 +78,20 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
         .insert({
           campaign_name: `${campaign.campaign_name} (복사)`,
           client_name: campaign.client_name,
+          normal_price: campaign.normal_price,
+          online_min_price: campaign.online_min_price,
+          supply_price: campaign.supply_price,
           gonggu_price: campaign.gonggu_price,
+          total_rs_rate: campaign.total_rs_rate,
           vendor_fee_rate: campaign.vendor_fee_rate,
           influencer_rs_rate: campaign.influencer_rs_rate,
+          shipping_fee: campaign.shipping_fee,
+          shipping_payer: campaign.shipping_payer,
+          vat_included: campaign.vat_included,
           start_date: campaign.start_date,
           end_date: campaign.end_date,
           purchase_form_url: campaign.purchase_form_url,
+          response_sheet_url: campaign.response_sheet_url,
           drive_url: campaign.drive_url,
         })
         .select()
@@ -135,6 +160,30 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
             신규 캠페인 등록
           </Link>
         </div>
+      </div>
+
+      {/* 상태 탭 필터 */}
+      <div className="flex items-center gap-1 flex-wrap">
+        {(["전체", "진행중", "종료"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`btn btn-sm flex items-center gap-1.5 ${
+              statusFilter === s ? "btn-primary" : "btn-secondary"
+            }`}
+          >
+            {s}
+            <span
+              className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${
+                statusFilter === s
+                  ? "bg-white/30 text-white"
+                  : "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {statusCounts[s]}
+            </span>
+          </button>
+        ))}
       </div>
 
       {/* 카드뷰 */}

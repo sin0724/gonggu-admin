@@ -38,6 +38,7 @@ export interface Campaign {
   gonggu_price: number | null;
   vendor_fee_rate: number | null;
   influencer_rs_rate: number | null;
+  total_rs_rate: number | null;
   shipping_fee: number | null;
   shipping_payer: string | null;
   vat_included: boolean | null;
@@ -73,6 +74,7 @@ export interface CampaignInfluencer {
   content_url: string | null;
   is_uploaded: boolean;
   sales_amount: number;
+  quantity: number;
   settlement_method: string | null;
   settlement_amount: number;
   is_settled: boolean;

@@ -70,6 +70,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   );
   // 가격 입력 통화. 광고주가 TWD로 단가를 주는 경우 NT$로 바로 입력 (저장은 항상 KRW).
   const [priceCurrency, setPriceCurrency] = useState<"krw" | "twd">("krw");
+  // 목표 판매액 입력 통화 — 가격 통화와 독립. 기본 원화.
+  const [targetCurrency, setTargetCurrency] = useState<"krw" | "twd">("krw");
 
   const [formData, setFormData] = useState({
     client_name: campaign?.client_name ?? "",
@@ -154,17 +156,37 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           online_min_price: conv(prev.online_min_price),
           supply_price: conv(prev.supply_price),
           gonggu_price: conv(prev.gonggu_price),
-          target_sales: conv(prev.target_sales),
         };
       });
     }
     setPriceCurrency(cur);
   };
 
+  // 목표 판매액 통화 전환 — 입력값을 새 통화로 환산해 유지.
+  const handleTargetCurrency = (cur: "krw" | "twd") => {
+    if (cur === targetCurrency) return;
+    if (cur === "twd" && rate === null) return;
+    if (rate !== null) {
+      setFormData((prev) => {
+        const v = parseFloat(prev.target_sales);
+        if (!prev.target_sales || isNaN(v)) return prev;
+        return {
+          ...prev,
+          target_sales:
+            cur === "twd"
+              ? (Math.round((v / rate) * 10) / 10).toString()
+              : Math.round(v * rate).toString(),
+        };
+      });
+    }
+    setTargetCurrency(cur);
+  };
+
   // 환율을 지우면 TWD 입력을 유지할 수 없으므로 원화 입력으로 되돌림.
   useEffect(() => {
     if (rate === null && priceCurrency === "twd") setPriceCurrency("krw");
-  }, [rate, priceCurrency]);
+    if (rate === null && targetCurrency === "twd") setTargetCurrency("krw");
+  }, [rate, priceCurrency, targetCurrency]);
 
   const normalPrice = toKrw(parseFloat(formData.normal_price) || 0);
   const onlineMinPrice = toKrw(parseFloat(formData.online_min_price) || 0);
@@ -194,8 +216,12 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   };
   const econ = computeUnitEconomics(econInput);
 
-  // 목표 KPI — 목표 판매액(입력 통화 → KRW)을 돈 흐름 모델대로 분배
-  const targetSales = toKrw(parseFloat(formData.target_sales) || 0);
+  // 목표 KPI — 목표 판매액(자체 통화 → KRW)을 돈 흐름 모델대로 분배
+  const targetUnitLabel = targetCurrency === "twd" ? "NT$" : "원";
+  const targetSales =
+    targetCurrency === "twd" && rate !== null
+      ? (parseFloat(formData.target_sales) || 0) * rate
+      : parseFloat(formData.target_sales) || 0;
   const targetDist =
     targetSales > 0
       ? distributeSales({
@@ -1397,23 +1423,59 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           분배되는지 한눈에 보여줍니다. (현재 가격·RS 구조 기준)
         </p>
 
+        {/* 목표 판매액 입력 통화 토글 (가격 통화와 독립) */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="text-xs text-gray-500">목표 판매액 단위</span>
+          <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => handleTargetCurrency("krw")}
+              className={`px-3 py-1.5 text-xs font-medium ${
+                targetCurrency === "krw"
+                  ? "bg-primary-600 text-white"
+                  : "bg-white text-gray-600"
+              }`}
+            >
+              원 (KRW)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTargetCurrency("twd")}
+              disabled={rate === null}
+              title={rate === null ? "환율을 먼저 입력하세요" : undefined}
+              className={`px-3 py-1.5 text-xs font-medium ${
+                targetCurrency === "twd"
+                  ? "bg-primary-600 text-white"
+                  : "bg-white text-gray-600"
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              NT$ (TWD)
+            </button>
+          </div>
+          {rate === null && (
+            <span className="text-xs text-gray-400">
+              환율 입력 시 NT$로도 목표를 설정할 수 있습니다.
+            </span>
+          )}
+        </div>
+
         <div className="flex flex-wrap items-end gap-3 mb-5">
           <div>
-            <label className="label">목표 판매액 ({unitLabel})</label>
+            <label className="label">목표 판매액 ({targetUnitLabel})</label>
             <input
               type="number"
               name="target_sales"
               value={formData.target_sales}
               onChange={handleChange}
               className="input w-52"
-              placeholder={priceCurrency === "twd" ? "예: 2,300,000" : "예: 100,000,000"}
+              placeholder={targetCurrency === "twd" ? "예: 2,300,000" : "예: 100,000,000"}
               min="0"
             />
             {targetSales > 0 && (
               <p className="text-xs text-gray-400 mt-1">= {moneyText(targetSales)}</p>
             )}
           </div>
-          {priceCurrency === "krw" && (
+          {targetCurrency === "krw" && (
             <div className="flex items-center gap-1.5">
               {[50_000_000, 100_000_000, 300_000_000].map((v) => (
                 <button

@@ -9,7 +9,7 @@ export default async function SettlementsPage() {
   const { data } = await supabase
     .from("campaign_influencers")
     .select(
-      "*, influencer:influencers(*), campaign:campaigns(id, campaign_name, client_name, influencer_rs_rate)"
+      "*, influencer:influencers(*), campaign:campaigns(id, campaign_name, client_name, influencer_rs_rate, exchange_rate)"
     )
     .order("created_at", { ascending: false });
 

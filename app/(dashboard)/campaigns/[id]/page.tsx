@@ -1,10 +1,45 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { formatDate } from "@/lib/utils";
-import { isCampaignActive } from "@/lib/utils";
+import {
+  formatDate,
+  isCampaignActive,
+  formatWon,
+  formatTwd,
+  formatMoney,
+  krwToTwd,
+} from "@/lib/utils";
 import InfluencerTable from "@/components/influencers/influencer-table";
 import { CampaignInfluencerWithDetails } from "@/types/database";
+
+/** KPI 카드용 금액 — TWD를 메인으로, 원화를 보조로 표기. 환율 없으면 원화만. */
+function MoneyKpi({
+  krw,
+  rate,
+  className,
+  unitClassName,
+}: {
+  krw: number;
+  rate: number | null;
+  className: string;
+  unitClassName: string;
+}) {
+  const twd = krwToTwd(krw, rate);
+  if (twd === null) {
+    return (
+      <p className={className}>
+        {Math.round(krw).toLocaleString("ko-KR")}
+        <span className={unitClassName}>원</span>
+      </p>
+    );
+  }
+  return (
+    <>
+      <p className={className}>{formatTwd(twd)}</p>
+      <p className="text-xs text-gray-400 mt-0.5">{formatWon(krw)}</p>
+    </>
+  );
+}
 
 interface CampaignDetailPageProps {
   params: Promise<{ id: string }>;
@@ -36,6 +71,7 @@ export default async function CampaignDetailPage({
   const vendorFeeRate = campaign.vendor_fee_rate ?? 0;
   const influencerRsRate = campaign.influencer_rs_rate ?? 0;
   const supplyPrice = campaign.supply_price ?? 0;
+  const rate = campaign.exchange_rate;
 
   const formatCurrency = (n: number) =>
     n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
@@ -76,7 +112,7 @@ export default async function CampaignDetailPage({
   } else if (isSupplyDeal) {
     clientPayout = quantity * supplyPrice;
     totalVendorMargin = totalSales - clientPayout - totalKolRs;
-    payoutNote = `수량 × 공급가 ${formatCurrency(supplyPrice)}원${isQuantityEstimated ? " · 수량 추정" : ""}`;
+    payoutNote = `수량 × 공급가 ${formatMoney(supplyPrice, rate)}${isQuantityEstimated ? " · 수량 추정" : ""}`;
     vendorNote = `판매액 − 공급가 − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
   } else {
     totalVendorMargin = totalSales * (vendorFeeRate / 100);
@@ -146,14 +182,18 @@ export default async function CampaignDetailPage({
               </svg>
               {campaign.normal_price && (
                 <>
-                  <span className="text-gray-400 line-through text-xs">{formatCurrency(campaign.normal_price)}원</span>
+                  <span className="text-gray-400 line-through text-xs">
+                    {krwToTwd(campaign.normal_price, rate) !== null
+                      ? formatTwd(krwToTwd(campaign.normal_price, rate)!)
+                      : formatWon(campaign.normal_price)}
+                  </span>
                   <span className="text-red-500 text-xs font-medium">
                     {(((campaign.normal_price - campaign.gonggu_price) / campaign.normal_price) * 100).toFixed(0)}%↓
                   </span>
                   <span className="text-gray-300">|</span>
                 </>
               )}
-              공구가 {formatCurrency(campaign.gonggu_price)}원
+              공구가 {formatMoney(campaign.gonggu_price, rate)}
               <span className="text-gray-300">|</span>
               <span className="text-blue-600 font-medium">벤더 {vendorFeeRate}%</span>
               <span className="text-gray-300">|</span>
@@ -201,7 +241,12 @@ export default async function CampaignDetailPage({
           {/* 총 판매액 */}
           <div className="card p-4 col-span-1 md:col-span-1">
             <p className="text-xs text-gray-400 mb-1">총 판매액</p>
-            <p className="text-xl font-bold text-gray-900">{formatCurrency(totalSales)}<span className="text-xs font-normal text-gray-400 ml-0.5">원</span></p>
+            <MoneyKpi
+              krw={totalSales}
+              rate={rate}
+              className="text-xl font-bold text-gray-900"
+              unitClassName="text-xs font-normal text-gray-400 ml-0.5"
+            />
             {quantity > 0 && (
               <p className="text-xs text-gray-400 mt-0.5">
                 {formatCurrency(quantity)}개{isQuantityEstimated && " (추정)"}
@@ -212,16 +257,24 @@ export default async function CampaignDetailPage({
           {/* 벤더사 마진 - 가장 중요 */}
           <div className="card p-4 border-blue-200 bg-blue-50 col-span-1">
             <p className="text-xs text-blue-500 font-medium mb-1">벤더사 마진 (우리)</p>
-            <p className={`text-xl font-bold ${totalVendorMargin >= 0 ? "text-blue-700" : "text-red-600"}`}>
-              {formatCurrency(totalVendorMargin)}<span className="text-xs font-normal text-blue-400 ml-0.5">원</span>
-            </p>
+            <MoneyKpi
+              krw={totalVendorMargin}
+              rate={rate}
+              className={`text-xl font-bold ${totalVendorMargin >= 0 ? "text-blue-700" : "text-red-600"}`}
+              unitClassName="text-xs font-normal text-blue-400 ml-0.5"
+            />
             <p className="text-xs text-blue-400 mt-0.5">{vendorNote}</p>
           </div>
 
           {/* KOL RS 지급액 */}
           <div className="card p-4">
             <p className="text-xs text-gray-400 mb-1">KOL RS 지급액</p>
-            <p className="text-xl font-bold text-purple-600">{formatCurrency(totalKolRs)}<span className="text-xs font-normal text-gray-400 ml-0.5">원</span></p>
+            <MoneyKpi
+              krw={totalKolRs}
+              rate={rate}
+              className="text-xl font-bold text-purple-600"
+              unitClassName="text-xs font-normal text-gray-400 ml-0.5"
+            />
             <p className="text-xs text-gray-400 mt-0.5">
               {totalSettlement > 0 ? "실제 정산액 기준" : `판매액 × ${influencerRsRate}%`}
             </p>
@@ -230,9 +283,12 @@ export default async function CampaignDetailPage({
           {/* 클라이언트 정산액 */}
           <div className="card p-4 border-green-200 bg-green-50">
             <p className="text-xs text-green-500 font-medium mb-1">클라이언트 정산액</p>
-            <p className="text-xl font-bold text-green-700">
-              {formatCurrency(clientPayout)}<span className="text-xs font-normal text-green-400 ml-0.5">원</span>
-            </p>
+            <MoneyKpi
+              krw={clientPayout}
+              rate={rate}
+              className="text-xl font-bold text-green-700"
+              unitClassName="text-xs font-normal text-green-400 ml-0.5"
+            />
             <p className="text-xs text-green-400 mt-0.5">{payoutNote}</p>
           </div>
 
@@ -261,6 +317,7 @@ export default async function CampaignDetailPage({
           records={records}
           campaignInfluencerRsRate={campaign.influencer_rs_rate ?? undefined}
           campaignPurchaseFormUrl={campaign.purchase_form_url ?? undefined}
+          campaignExchangeRate={rate}
         />
       </div>
     </div>

@@ -10,7 +10,7 @@ import {
   STATUS_COLORS,
   CONTENT_TYPE_LABEL,
 } from "@/types/database";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatDate, formatWon, formatTwd, krwToTwd } from "@/lib/utils";
 import InfluencerModal from "./influencer-modal";
 
 interface InfluencerTableProps {
@@ -18,6 +18,31 @@ interface InfluencerTableProps {
   records: CampaignInfluencerWithDetails[];
   campaignInfluencerRsRate?: number;
   campaignPurchaseFormUrl?: string;
+  /** 캠페인 환율 (1 TWD 당 원화). 있으면 금액을 TWD 메인 · 원화 보조로 표기. */
+  campaignExchangeRate?: number | null;
+}
+
+/** 금액 셀 — TWD 메인 · 원화 보조. 환율 없으면 원화만. */
+function Money({
+  krw,
+  rate,
+  className,
+}: {
+  krw: number;
+  rate: number | null;
+  className?: string;
+}) {
+  if (!(krw > 0)) return <span className="text-gray-300">-</span>;
+  const twd = krwToTwd(krw, rate);
+  if (twd === null) return <span className={className}>{formatWon(krw)}</span>;
+  return (
+    <span className={className}>
+      {formatTwd(twd)}
+      <span className="block text-xs font-normal text-gray-400">
+        {formatWon(krw)}
+      </span>
+    </span>
+  );
 }
 
 const STATUS_OPTIONS: ProgressStatus[] = [
@@ -35,6 +60,7 @@ export default function InfluencerTable({
   records,
   campaignInfluencerRsRate,
   campaignPurchaseFormUrl,
+  campaignExchangeRate = null,
 }: InfluencerTableProps) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -153,10 +179,13 @@ export default function InfluencerTable({
       "발송일",
       "콘텐츠",
       "업로드여부",
-      "판매액",
+      "환율(1TWD=원)",
+      "판매액(원)",
+      "판매액(TWD)",
       "판매수량",
       "정산방식",
-      "정산금액",
+      "정산금액(원)",
+      "정산금액(TWD)",
       "정산여부",
       "정산일",
       "진행상태",
@@ -179,10 +208,19 @@ export default function InfluencerTable({
         r.sent_date ?? "",
         contentList,
         r.is_uploaded ? "Y" : "N",
+        campaignExchangeRate ? campaignExchangeRate.toString() : "",
         r.sales_amount?.toString() ?? "0",
+        (() => {
+          const t = krwToTwd(r.sales_amount ?? 0, campaignExchangeRate);
+          return t !== null ? Math.round(t).toString() : "";
+        })(),
         r.quantity?.toString() ?? "0",
         r.settlement_method ?? "",
         r.settlement_amount?.toString() ?? "0",
+        (() => {
+          const t = krwToTwd(r.settlement_amount ?? 0, campaignExchangeRate);
+          return t !== null ? Math.round(t).toString() : "";
+        })(),
         r.is_settled ? "Y" : "N",
         r.settled_date ?? "",
         status,
@@ -398,17 +436,17 @@ export default function InfluencerTable({
                           )}
                         </td>
                         <td className="table-cell text-right font-medium hidden md:table-cell">
-                          {r.sales_amount > 0
-                            ? formatCurrency(r.sales_amount)
-                            : "-"}
+                          <Money krw={r.sales_amount} rate={campaignExchangeRate} />
                         </td>
                         <td className="table-cell text-right text-gray-600 hidden md:table-cell">
                           {r.quantity > 0 ? `${r.quantity}개` : "-"}
                         </td>
                         <td className="table-cell text-right font-medium text-green-700 hidden md:table-cell">
-                          {r.settlement_amount > 0
-                            ? formatCurrency(r.settlement_amount)
-                            : "-"}
+                          <Money
+                            krw={r.settlement_amount}
+                            rate={campaignExchangeRate}
+                            className="font-medium text-green-700"
+                          />
                         </td>
                         <td className="table-cell text-gray-500 text-xs hidden md:table-cell">
                           {r.settlement_method || "-"}
@@ -496,6 +534,7 @@ export default function InfluencerTable({
           onClose={handleCloseModal}
           campaignInfluencerRsRate={campaignInfluencerRsRate}
           campaignPurchaseFormUrl={campaignPurchaseFormUrl}
+          campaignExchangeRate={campaignExchangeRate}
         />
       )}
     </>

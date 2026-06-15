@@ -26,6 +26,40 @@ export function formatNumber(num: number): string {
   return new Intl.NumberFormat("ko-KR").format(num);
 }
 
+/** 원화 표기: "30,000원" */
+export function formatWon(amount: number): string {
+  return `${Math.round(amount).toLocaleString("ko-KR")}원`;
+}
+
+/** 대만달러 표기: "NT$690" */
+export function formatTwd(amount: number): string {
+  return `NT$${Math.round(amount).toLocaleString("en-US")}`;
+}
+
+/**
+ * 원화 → TWD 환산. rate = 1 TWD 당 원화(KRW).
+ * 환율이 없거나 0 이하이면 null (TWD 표기 불가).
+ */
+export function krwToTwd(
+  krw: number,
+  rate: number | null | undefined
+): number | null {
+  if (!rate || rate <= 0) return null;
+  return krw / rate;
+}
+
+/**
+ * 메인 TWD + 보조 KRW 한 줄 표기.
+ * 환율이 있으면 "NT$690 (30,000원)", 없으면 "30,000원".
+ */
+export function formatMoney(
+  krw: number,
+  rate: number | null | undefined
+): string {
+  const twd = krwToTwd(krw, rate);
+  return twd === null ? formatWon(krw) : `${formatTwd(twd)} (${formatWon(krw)})`;
+}
+
 export function isCampaignActive(
   startDate: string | null,
   endDate: string | null

@@ -45,6 +45,8 @@ export interface Campaign {
   shipping_fee: number | null;
   shipping_payer: string | null;
   vat_included: boolean | null;
+  /** 환율 — 1 TWD 당 원화(KRW). TWD 환산 = 원화 ÷ exchange_rate. NULL이면 원화로만 표기. */
+  exchange_rate: number | null;
   start_date: string | null;
   end_date: string | null;
   purchase_form_url: string | null;

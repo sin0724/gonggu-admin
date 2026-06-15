@@ -12,6 +12,7 @@ import {
   CONTENT_TYPE_LABEL,
   hasBankDetails,
 } from "@/types/database";
+import { formatTwd, krwToTwd } from "@/lib/utils";
 
 const CONTENT_TYPE_OPTIONS = Object.entries(CONTENT_TYPE_LABEL) as [
   ContentType,
@@ -32,6 +33,7 @@ interface InfluencerModalProps {
   onClose: () => void;
   campaignInfluencerRsRate?: number;
   campaignPurchaseFormUrl?: string;
+  campaignExchangeRate?: number | null;
 }
 
 export default function InfluencerModal({
@@ -40,6 +42,7 @@ export default function InfluencerModal({
   onClose,
   campaignInfluencerRsRate,
   campaignPurchaseFormUrl,
+  campaignExchangeRate = null,
 }: InfluencerModalProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -604,6 +607,15 @@ export default function InfluencerModal({
                   min="0"
                   step="1"
                 />
+                {(() => {
+                  const t = krwToTwd(
+                    parseFloat(formData.sales_amount) || 0,
+                    campaignExchangeRate
+                  );
+                  return t !== null && t > 0 ? (
+                    <p className="text-xs text-gray-400 mt-1">= {formatTwd(t)}</p>
+                  ) : null;
+                })()}
               </div>
               <div>
                 <label className="label">판매수량 (개)</label>
@@ -638,6 +650,15 @@ export default function InfluencerModal({
                   min="0"
                   step="1"
                 />
+                {(() => {
+                  const t = krwToTwd(
+                    parseFloat(formData.settlement_amount) || 0,
+                    campaignExchangeRate
+                  );
+                  return t !== null && t > 0 ? (
+                    <p className="text-xs text-gray-400 mt-1">= {formatTwd(t)}</p>
+                  ) : null;
+                })()}
               </div>
             </div>
             <div>

@@ -1,12 +1,13 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatWon, formatTwd, krwToTwd } from "@/lib/utils";
 import { computeUnitEconomics } from "@/lib/economics";
 import PrintButton from "@/components/campaigns/print-button";
 
 // 클라이언트 제안서 — 외부 공유용.
 // 공급가, 벤더/KOL RS 분배, 벤더사 마진은 절대 노출하지 않는다. 총 RS만 표시.
+// 표기 통화: 대만달러(TWD)만 노출. 원화는 우리 내부용이므로 제안서에 표시하지 않는다.
 
 interface ProposalPageProps {
   params: Promise<{ id: string }>;
@@ -47,8 +48,12 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
     onlineMinPrice,
   });
 
-  const fmt = (n: number) =>
-    n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
+  // 환율(1 TWD 당 원화)이 있으면 TWD로, 없으면 원화로 표기.
+  const rate = campaign.exchange_rate;
+  const money = (n: number) => {
+    const twd = krwToTwd(n, rate);
+    return twd === null ? formatWon(n) : formatTwd(twd);
+  };
 
   const totalRsAmount = gongguPrice * (totalRsRate / 100);
 
@@ -69,10 +74,17 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-700 print:hidden">
-        이 화면은 클라이언트 공유용입니다. 공급가, RS 분배 내역(KOL/벤더), 벤더사
-        마진은 표시되지 않습니다. 우측 상단 버튼으로 인쇄하거나 PDF로 저장해
-        전달하세요.
+        이 화면은 클라이언트 공유용입니다. 금액은 대만달러(TWD)로만 표시되며,
+        공급가·RS 분배 내역(KOL/벤더)·벤더사 마진·원화 금액은 표시되지 않습니다.
+        우측 상단 버튼으로 인쇄하거나 PDF로 저장해 전달하세요.
       </div>
+
+      {rate == null && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs text-red-600 print:hidden">
+          환율이 입력되지 않아 금액이 원화로 표시됩니다. TWD 표기를 위해 캠페인
+          수정에서 환율(1 TWD = ___ 원)을 입력하세요.
+        </div>
+      )}
 
       {/* ── 제안서 본문 ── */}
       <div className="card p-8 space-y-8 print:shadow-none print:border-0">
@@ -103,7 +115,7 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
               <div className="rounded-xl border border-gray-200 p-4">
                 <p className="text-xs text-gray-400 mb-1">정상가</p>
                 <p className="text-lg font-bold text-gray-500 line-through">
-                  {fmt(normalPrice)}원
+                  {money(normalPrice)}
                 </p>
               </div>
             )}
@@ -111,7 +123,7 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
               <div className="rounded-xl border border-gray-200 p-4">
                 <p className="text-xs text-gray-400 mb-1">온라인 최저가</p>
                 <p className="text-lg font-bold text-gray-600">
-                  {fmt(onlineMinPrice)}원
+                  {money(onlineMinPrice)}
                 </p>
               </div>
             )}
@@ -120,7 +132,7 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
                 공구 제안가
               </p>
               <p className="text-lg font-bold text-primary-700">
-                {fmt(gongguPrice)}원
+                {money(gongguPrice)}
               </p>
               {!vatIncluded && (
                 <p className="text-xs text-primary-400 mt-0.5">VAT 별도</p>
@@ -130,7 +142,7 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
               <div className="rounded-xl border border-gray-200 p-4">
                 <p className="text-xs text-gray-400 mb-1">소비자 실결제가</p>
                 <p className="text-lg font-bold text-gray-900">
-                  {fmt(econ.consumerPrice)}원
+                  {money(econ.consumerPrice)}
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">VAT 포함</p>
               </div>
@@ -170,15 +182,15 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
               <span className="text-gray-500">마케팅 수수료 (총 RS)</span>
               <span className="font-semibold text-gray-900">
                 판매액의 {totalRsRate}%
-                {gongguPrice > 0 && ` (1건당 ${fmt(totalRsAmount)}원)`}
+                {gongguPrice > 0 && ` (1건당 ${money(totalRsAmount)})`}
               </span>
             </div>
             <div className="flex justify-between px-4 py-3">
               <span className="text-gray-500">배송비</span>
               <span className="font-semibold text-gray-900">
                 {campaign.shipping_payer === "seller"
-                  ? `판매자 부담${campaign.shipping_fee ? ` (${fmt(campaign.shipping_fee)}원)` : ""}`
-                  : `구매자 부담${campaign.shipping_fee ? ` (${fmt(campaign.shipping_fee)}원)` : ""}`}
+                  ? `판매자 부담${campaign.shipping_fee ? ` (${money(campaign.shipping_fee)})` : ""}`
+                  : `구매자 부담${campaign.shipping_fee ? ` (${money(campaign.shipping_fee)})` : ""}`}
               </span>
             </div>
             <div className="flex justify-between px-4 py-3">
@@ -209,7 +221,7 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
               <div className="flex justify-between px-4 py-3">
                 <span className="text-gray-500">귀사 정산 단가</span>
                 <span className="font-semibold text-gray-900">
-                  개당 {fmt(econ.clientTakePerUnit)}원
+                  개당 {money(econ.clientTakePerUnit)}
                 </span>
               </div>
               <div className="flex justify-between px-4 py-3">
@@ -227,6 +239,7 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
         {/* 푸터 */}
         <div className="border-t border-gray-200 pt-4 text-xs text-gray-400 text-center">
           본 제안서는 협의용 자료이며, 최종 조건은 계약서 기준으로 합니다.
+          {rate != null && " 표기 금액은 대만달러(TWD) 기준입니다."}
         </div>
       </div>
     </div>

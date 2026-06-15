@@ -9,7 +9,7 @@ import {
   STATUS_COLORS,
   hasBankDetails,
 } from "@/types/database";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatTwd, krwToTwd } from "@/lib/utils";
 
 export interface SettlementRecord extends CampaignInfluencer {
   influencer: Influencer;
@@ -18,6 +18,7 @@ export interface SettlementRecord extends CampaignInfluencer {
     campaign_name: string;
     client_name: string;
     influencer_rs_rate: number | null;
+    exchange_rate: number | null;
   };
 }
 
@@ -25,6 +26,29 @@ type Filter = "전체" | "정산대기" | "정산완료" | "판매중";
 
 const fmt = (n: number) =>
   n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
+
+/** 정산 행 금액 — TWD 메인 · 원화 보조. 환율 없으면 원화만. */
+function Money({
+  krw,
+  rate,
+  className,
+}: {
+  krw: number;
+  rate: number | null;
+  className?: string;
+}) {
+  if (!(krw > 0)) return <span className="text-gray-300">-</span>;
+  const twd = krwToTwd(krw, rate);
+  if (twd === null) return <span className={className}>{fmt(krw)}원</span>;
+  return (
+    <span className={className}>
+      {formatTwd(twd)}
+      <span className="block text-xs font-normal text-gray-400">
+        {fmt(krw)}원
+      </span>
+    </span>
+  );
+}
 
 export default function SettlementTable({
   records,
@@ -67,16 +91,35 @@ export default function SettlementTable({
     (s, { r }) => s + (r.settlement_amount || 0),
     0
   );
+  // 캠페인마다 환율이 달라 TWD 합계는 각 행을 자기 환율로 환산해 합산.
+  // 환율이 입력된 건이 하나라도 있을 때만 TWD 합계를 표시하고,
+  // 일부 건에 환율이 없으면 합계가 불완전함을 안내한다.
+  const totalSalesTwd = filtered.reduce((s, { r }) => {
+    const t = krwToTwd(r.sales_amount || 0, r.campaign.exchange_rate);
+    return t !== null ? s + t : s;
+  }, 0);
+  const totalSettlementTwd = filtered.reduce((s, { r }) => {
+    const t = krwToTwd(r.settlement_amount || 0, r.campaign.exchange_rate);
+    return t !== null ? s + t : s;
+  }, 0);
+  const anyRate = filtered.some(
+    ({ r }) => r.campaign.exchange_rate && r.campaign.exchange_rate > 0
+  );
+  const someMissingRate =
+    anyRate && filtered.some(({ r }) => !r.campaign.exchange_rate);
 
   const handleExportCSV = () => {
     const headers = [
       "캠페인",
       "클라이언트",
       "인플루언서",
-      "판매액",
+      "환율(1TWD=원)",
+      "판매액(원)",
+      "판매액(TWD)",
       "수량",
       "RS율(%)",
-      "정산금액",
+      "정산금액(원)",
+      "정산금액(TWD)",
       "정산방식",
       "정산여부",
       "정산일",
@@ -90,27 +133,35 @@ export default function SettlementTable({
       "주소",
       "메모",
     ];
-    const rows = filtered.map(({ r, status }) => [
-      r.campaign.campaign_name,
-      r.campaign.client_name,
-      r.influencer.name,
-      (r.sales_amount ?? 0).toString(),
-      (r.quantity ?? 0).toString(),
-      (r.campaign.influencer_rs_rate ?? 0).toString(),
-      (r.settlement_amount ?? 0).toString(),
-      r.settlement_method ?? "",
-      r.is_settled ? "Y" : "N",
-      r.settled_date ?? "",
-      status,
-      r.influencer.bank_account_holder ?? "",
-      r.influencer.bank_name ?? "",
-      r.influencer.bank_account_number ?? "",
-      r.influencer.bank_account_type ?? "",
-      r.influencer.bank_swift_code ?? "",
-      r.influencer.bank_email ?? "",
-      r.influencer.bank_address ?? "",
-      r.notes ?? "",
-    ]);
+    const rows = filtered.map(({ r, status }) => {
+      const rate = r.campaign.exchange_rate;
+      const salesTwd = krwToTwd(r.sales_amount ?? 0, rate);
+      const settleTwd = krwToTwd(r.settlement_amount ?? 0, rate);
+      return [
+        r.campaign.campaign_name,
+        r.campaign.client_name,
+        r.influencer.name,
+        rate ? rate.toString() : "",
+        (r.sales_amount ?? 0).toString(),
+        salesTwd !== null ? Math.round(salesTwd).toString() : "",
+        (r.quantity ?? 0).toString(),
+        (r.campaign.influencer_rs_rate ?? 0).toString(),
+        (r.settlement_amount ?? 0).toString(),
+        settleTwd !== null ? Math.round(settleTwd).toString() : "",
+        r.settlement_method ?? "",
+        r.is_settled ? "Y" : "N",
+        r.settled_date ?? "",
+        status,
+        r.influencer.bank_account_holder ?? "",
+        r.influencer.bank_name ?? "",
+        r.influencer.bank_account_number ?? "",
+        r.influencer.bank_account_type ?? "",
+        r.influencer.bank_swift_code ?? "",
+        r.influencer.bank_email ?? "",
+        r.influencer.bank_address ?? "",
+        r.notes ?? "",
+      ];
+    });
     const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const csv =
       "\uFEFF" +
@@ -135,17 +186,43 @@ export default function SettlementTable({
       <div className="grid grid-cols-2 gap-3 max-w-xl">
         <div className="card p-4">
           <p className="text-xs text-gray-400 mb-1">선택 조건 판매액 합계</p>
-          <p className="text-xl font-bold text-gray-900">{fmt(totalSales)}원</p>
+          {anyRate ? (
+            <>
+              <p className="text-xl font-bold text-gray-900">
+                {formatTwd(totalSalesTwd)}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">{fmt(totalSales)}원</p>
+            </>
+          ) : (
+            <p className="text-xl font-bold text-gray-900">{fmt(totalSales)}원</p>
+          )}
         </div>
         <div className="card p-4 border-orange-200 bg-orange-50">
           <p className="text-xs text-orange-500 font-medium mb-1">
             선택 조건 정산금액 합계
           </p>
-          <p className="text-xl font-bold text-orange-700">
-            {fmt(totalSettlement)}원
-          </p>
+          {anyRate ? (
+            <>
+              <p className="text-xl font-bold text-orange-700">
+                {formatTwd(totalSettlementTwd)}
+              </p>
+              <p className="text-xs text-orange-400 mt-0.5">
+                {fmt(totalSettlement)}원
+              </p>
+            </>
+          ) : (
+            <p className="text-xl font-bold text-orange-700">
+              {fmt(totalSettlement)}원
+            </p>
+          )}
         </div>
       </div>
+      {someMissingRate && (
+        <p className="text-xs text-amber-600 -mt-2">
+          ⚠ 일부 캠페인에 환율이 입력되지 않아 TWD 합계에서 제외되었습니다. 정확한
+          TWD 합계를 위해 해당 캠페인에 환율을 입력하세요.
+        </p>
+      )}
 
       {/* 필터 + 검색 + 내보내기 */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -227,12 +304,17 @@ export default function SettlementTable({
                       {r.influencer.name}
                     </td>
                     <td className="table-cell text-right">
-                      {r.sales_amount > 0 ? `${fmt(r.sales_amount)}원` : "-"}
+                      <Money
+                        krw={r.sales_amount}
+                        rate={r.campaign.exchange_rate}
+                      />
                     </td>
                     <td className="table-cell text-right font-semibold text-orange-700">
-                      {r.settlement_amount > 0
-                        ? `${fmt(r.settlement_amount)}원`
-                        : "-"}
+                      <Money
+                        krw={r.settlement_amount}
+                        rate={r.campaign.exchange_rate}
+                        className="font-semibold text-orange-700"
+                      />
                     </td>
                     <td className="table-cell text-gray-500 text-xs hidden md:table-cell">
                       {r.settlement_method || "-"}
@@ -267,7 +349,10 @@ export default function SettlementTable({
         </div>
         <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
           <p className="text-xs text-gray-500">
-            총 {filtered.length}건 · 정산금액 합계 {fmt(totalSettlement)}원
+            총 {filtered.length}건 · 정산금액 합계{" "}
+            {anyRate
+              ? `${formatTwd(totalSettlementTwd)} (${fmt(totalSettlement)}원)`
+              : `${fmt(totalSettlement)}원`}
           </p>
         </div>
       </div>

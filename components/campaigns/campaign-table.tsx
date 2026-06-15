@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Campaign } from "@/types/database";
-import { formatDate, isCampaignActive } from "@/lib/utils";
+import { formatDate, isCampaignActive, formatMoney } from "@/lib/utils";
 
 interface CampaignTableProps {
   campaigns: Campaign[];
@@ -89,6 +89,7 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
           shipping_fee: campaign.shipping_fee,
           shipping_payer: campaign.shipping_payer,
           vat_included: campaign.vat_included,
+          exchange_rate: campaign.exchange_rate,
           start_date: campaign.start_date,
           end_date: campaign.end_date,
           purchase_form_url: campaign.purchase_form_url,
@@ -221,7 +222,7 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
                       <p>
                         공구가:{" "}
                         {campaign.gonggu_price
-                          ? `${campaign.gonggu_price.toLocaleString("ko-KR")}원`
+                          ? formatMoney(campaign.gonggu_price, campaign.exchange_rate)
                           : "-"}
                       </p>
                     </div>
@@ -296,7 +297,9 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
                         </td>
                         <td className="table-cell text-gray-600">{campaign.client_name}</td>
                         <td className="table-cell text-gray-500">
-                          {campaign.gonggu_price ? `${campaign.gonggu_price.toLocaleString("ko-KR")}원` : "-"}
+                          {campaign.gonggu_price
+                            ? formatMoney(campaign.gonggu_price, campaign.exchange_rate)
+                            : "-"}
                         </td>
                         <td className="table-cell text-gray-500 text-xs">{formatDate(campaign.start_date)}</td>
                         <td className="table-cell text-gray-500 text-xs">{formatDate(campaign.end_date)}</td>

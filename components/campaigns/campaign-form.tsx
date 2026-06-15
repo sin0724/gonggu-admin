@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Campaign, CampaignInsert } from "@/types/database";
+import { krwToTwd, formatTwd } from "@/lib/utils";
 import {
   computeUnitEconomics,
   judgeFeasibility,
@@ -36,12 +37,22 @@ const fmt = (n: number) =>
   n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 const fmtRate = (n: number) => n.toFixed(1);
 
-/** 가격 입력 아래 천단위 콤마 확인용 캡션 */
-function PriceCaption({ value, suffix }: { value: number; suffix?: string }) {
+/** 가격 입력 아래 천단위 콤마 + TWD 환산 확인용 캡션 (TWD 메인 · 원화 보조) */
+function PriceCaption({
+  value,
+  rate,
+  suffix,
+}: {
+  value: number;
+  rate: number | null;
+  suffix?: string;
+}) {
   if (!(value > 0)) return null;
+  const twd = krwToTwd(value, rate);
   return (
     <p className="text-xs text-gray-400 mt-1">
-      = {fmt(value)}원{suffix ? ` ${suffix}` : ""}
+      = {twd !== null ? `${formatTwd(twd)} · ` : ""}
+      {fmt(value)}원{suffix ? ` ${suffix}` : ""}
     </p>
   );
 }
@@ -64,6 +75,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     online_min_price: campaign?.online_min_price?.toString() ?? "",
     supply_price: campaign?.supply_price?.toString() ?? "",
     gonggu_price: campaign?.gonggu_price?.toString() ?? "",
+    exchange_rate: campaign?.exchange_rate?.toString() ?? "",
     total_rs_rate: campaign?.total_rs_rate?.toString() ?? "",
     influencer_rs_rate: campaign?.influencer_rs_rate?.toString() ?? "",
     vendor_fee_rate: campaign?.vendor_fee_rate?.toString() ?? "",
@@ -107,6 +119,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const onlineMinPrice = parseFloat(formData.online_min_price) || 0;
   const supplyPrice = parseFloat(formData.supply_price) || 0;
   const gongguPrice = parseFloat(formData.gonggu_price) || 0;
+  const exchangeRate = parseFloat(formData.exchange_rate) || 0;
+  const rate = exchangeRate > 0 ? exchangeRate : null;
+  // 헤드라인 금액 — TWD 메인 · 원화 보조 ("NT$690 · 30,000원"), 환율 없으면 원화만
+  const moneyText = (n: number) => {
+    const t = krwToTwd(n, rate);
+    return t !== null ? `${formatTwd(t)} · ${fmt(n)}원` : `${fmt(n)}원`;
+  };
   const totalRsRate = parseFloat(formData.total_rs_rate) || 0;
   const influencerRsRate = parseFloat(formData.influencer_rs_rate) || 0;
   const vendorFeeRate = parseFloat(formData.vendor_fee_rate) || 0;
@@ -211,6 +230,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             ? parseFloat(formData.supply_price)
             : null,
         gonggu_price: formData.gonggu_price ? parseFloat(formData.gonggu_price) : null,
+        exchange_rate: formData.exchange_rate ? parseFloat(formData.exchange_rate) : null,
         total_rs_rate: formData.total_rs_rate ? parseFloat(formData.total_rs_rate) : null,
         vendor_fee_rate: formData.vendor_fee_rate ? parseFloat(formData.vendor_fee_rate) : null,
         influencer_rs_rate: formData.influencer_rs_rate ? parseFloat(formData.influencer_rs_rate) : null,
@@ -335,6 +355,34 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             : "공구가 − 공급가 = 가용 재원. 그 재원에서 KOL RS를 주고 남는 것이 벤더사(우리) 마진입니다."}
         </p>
 
+        {/* 환율 — 1 TWD 당 원화. 입력 시 모든 금액이 TWD 메인으로 표기됨 */}
+        <div className="flex flex-wrap items-end gap-3 mb-5 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+          <div>
+            <label className="text-xs text-emerald-700 font-medium block mb-1">
+              환율 (1 TWD = ___ 원)
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-emerald-700 font-medium">NT$1 =</span>
+              <input
+                type="number"
+                name="exchange_rate"
+                value={formData.exchange_rate}
+                onChange={handleChange}
+                className="w-28 px-3 py-2 text-sm border border-emerald-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                placeholder="예: 43.5"
+                min="0"
+                step="0.01"
+              />
+              <span className="text-sm text-emerald-700 font-medium">원</span>
+            </div>
+          </div>
+          <p className="text-xs text-emerald-600 leading-relaxed flex-1 min-w-[12rem]">
+            {rate !== null && gongguPrice > 0
+              ? `공구가 ${fmt(gongguPrice)}원 = ${formatTwd(krwToTwd(gongguPrice, rate)!)} · 클라이언트 제안서와 화면 금액이 TWD를 메인으로 표기됩니다 (원화는 보조).`
+              : "환율을 입력하면 모든 금액이 대만달러(TWD)를 메인으로 표기됩니다. 미입력 시 원화로만 표기됩니다."}
+          </p>
+        </div>
+
         {/* 딜 방식 선택 */}
         <div className="flex items-center gap-2 mb-5">
           <button
@@ -383,7 +431,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 placeholder="예: 50,000"
                 min="0"
               />
-              <PriceCaption value={normalPrice} suffix="· 소비자 정상 판매가" />
+              <PriceCaption value={normalPrice} rate={rate} suffix="· 소비자 정상 판매가" />
             </div>
             <div>
               <label className="label">온라인 최저가 (원)</label>
@@ -396,7 +444,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 placeholder="예: 40,000"
                 min="0"
               />
-              <PriceCaption value={onlineMinPrice} suffix="· 공구가 상한선" />
+              <PriceCaption value={onlineMinPrice} rate={rate} suffix="· 공구가 상한선" />
             </div>
             {dealType === "supply" && (
               <div>
@@ -412,6 +460,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 />
                 <PriceCaption
                   value={supplyPrice}
+                  rate={rate}
                   suffix="· 클라이언트 몫 (개당 정산 단가)"
                 />
               </div>
@@ -429,7 +478,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               />
               {gongguPrice > 0 && (
                 <p className="text-xs text-blue-500 mt-1">
-                  = {fmt(gongguPrice)}원
+                  = {rate !== null && `${formatTwd(krwToTwd(gongguPrice, rate)!)} · `}
+                  {fmt(gongguPrice)}원
                   {onlineMinPrice > 0 &&
                     ` · 최저가 대비 ↓${fmtRate(econ.onlineMinDiscountRate)}%`}
                 </p>
@@ -444,7 +494,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-600">
                 클라이언트 몫 (자동 계산) ={" "}
                 <b className="text-gray-900">
-                  개당 {fmt(econ.clientTakePerUnit)}원
+                  개당 {moneyText(econ.clientTakePerUnit)}
                 </b>
                 <span className="text-xs text-gray-400">
                   공구가 {fmt(gongguPrice)}원 × (100 −{" "}
@@ -666,7 +716,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                   </p>
                   <div className="flex items-end gap-2">
                     <p className="text-2xl font-bold text-blue-700">
-                      {fmt(rsMinPrice)}원
+                      {rate !== null
+                        ? formatTwd(krwToTwd(rsMinPrice, rate)!)
+                        : `${fmt(rsMinPrice)}원`}
                     </p>
                     <button
                       type="button"
@@ -681,6 +733,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                       적용
                     </button>
                   </div>
+                  {rate !== null && (
+                    <p className="text-xs text-blue-400 mt-0.5">{fmt(rsMinPrice)}원</p>
+                  )}
                   <p className="text-xs text-blue-400 mt-0.5">
                     벤더 마진이 공구가 × {vendorFeeRate}%이므로, 1건당{" "}
                     {fmt(targetMargin)}원을 남기려면 공구가가 이 이상이어야
@@ -755,23 +810,32 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                     추천 공구가 (공급가 기준)
                   </p>
                   {rec ? (
-                    <div className="flex items-end gap-2">
-                      <p className="text-2xl font-bold text-blue-700">
-                        {fmt(recommendedPrice)}원
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            gonggu_price: recommendedPrice.toString(),
-                          }))
-                        }
-                        className="btn-secondary btn-sm mb-0.5"
-                      >
-                        적용
-                      </button>
-                    </div>
+                    <>
+                      <div className="flex items-end gap-2">
+                        <p className="text-2xl font-bold text-blue-700">
+                          {rate !== null
+                            ? formatTwd(krwToTwd(recommendedPrice, rate)!)
+                            : `${fmt(recommendedPrice)}원`}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              gonggu_price: recommendedPrice.toString(),
+                            }))
+                          }
+                          className="btn-secondary btn-sm mb-0.5"
+                        >
+                          적용
+                        </button>
+                      </div>
+                      {rate !== null && (
+                        <p className="text-xs text-blue-400 mt-0.5">
+                          {fmt(recommendedPrice)}원
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <p className="text-xs text-red-500">
                       KOL%와 목표 마진율 합이 100% 이상이라 계산 불가
@@ -786,13 +850,25 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                   <p className="text-xs text-blue-600 font-medium mb-1">
                     수용 가능 최대 공급가 (협상 카드)
                   </p>
-                  <p
-                    className={`text-2xl font-bold ${
-                      maxSupplyPrice > 0 ? "text-blue-700" : "text-red-500"
-                    }`}
-                  >
-                    {fmt(Math.max(0, Math.floor(maxSupplyPrice / 100) * 100))}원
-                  </p>
+                  {(() => {
+                    const maxSupply = Math.max(0, Math.floor(maxSupplyPrice / 100) * 100);
+                    return (
+                      <>
+                        <p
+                          className={`text-2xl font-bold ${
+                            maxSupplyPrice > 0 ? "text-blue-700" : "text-red-500"
+                          }`}
+                        >
+                          {rate !== null && maxSupply > 0
+                            ? formatTwd(krwToTwd(maxSupply, rate)!)
+                            : `${fmt(maxSupply)}원`}
+                        </p>
+                        {rate !== null && maxSupply > 0 && (
+                          <p className="text-xs text-blue-400">{fmt(maxSupply)}원</p>
+                        )}
+                      </>
+                    );
+                  })()}
                   <p className="text-xs text-blue-400 mt-0.5">
                     공구가 {fmt(gongguPrice)}원에서 KOL {influencerRsRate}%와
                     목표 마진을 확보하려면 공급가는 이 이하여야 합니다.
@@ -1044,7 +1120,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                         </p>
                       </div>
                       <span
-                        className={`text-xl font-bold ${
+                        className={`text-xl font-bold text-right ${
                           feasibility === "possible"
                             ? "text-green-700"
                             : feasibility === "conditional"
@@ -1052,7 +1128,14 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                             : "text-red-700"
                         }`}
                       >
-                        {fmt(econ.vendorMarginPerUnit)}원
+                        {rate !== null
+                          ? formatTwd(krwToTwd(econ.vendorMarginPerUnit, rate)!)
+                          : `${fmt(econ.vendorMarginPerUnit)}원`}
+                        {rate !== null && (
+                          <span className="block text-xs font-normal opacity-70">
+                            {fmt(econ.vendorMarginPerUnit)}원
+                          </span>
+                        )}
                       </span>
                     </div>
                   </div>
@@ -1146,11 +1229,11 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
                       {feasibility === "possible" &&
-                        `벤더 마진 ${fmt(econ.vendorMarginPerUnit)}원/건(${fmtRate(econ.vendorMarginRate)}%) — 공구 진행에 적합합니다.`}
+                        `벤더 마진 ${moneyText(econ.vendorMarginPerUnit)}/건(${fmtRate(econ.vendorMarginRate)}%) — 공구 진행에 적합합니다.`}
                       {feasibility === "conditional" &&
-                        `벤더 마진 ${fmt(econ.vendorMarginPerUnit)}원/건(${fmtRate(econ.vendorMarginRate)}%) — 조건 협의 후 진행을 권장합니다.`}
+                        `벤더 마진 ${moneyText(econ.vendorMarginPerUnit)}/건(${fmtRate(econ.vendorMarginRate)}%) — 조건 협의 후 진행을 권장합니다.`}
                       {feasibility === "not_recommended" &&
-                        `벤더 마진 ${fmt(econ.vendorMarginPerUnit)}원/건(${fmtRate(econ.vendorMarginRate)}%) — 수익성 부족으로 진행을 비추천합니다.`}
+                        `벤더 마진 ${moneyText(econ.vendorMarginPerUnit)}/건(${fmtRate(econ.vendorMarginRate)}%) — 수익성 부족으로 진행을 비추천합니다.`}
                     </p>
                   </div>
                   <span className={`text-4xl font-bold ${f.text} opacity-40`}>

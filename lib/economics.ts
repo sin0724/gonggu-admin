@@ -260,6 +260,62 @@ export function buildPriceScenarios(
     });
 }
 
+export interface SalesDistribution {
+  /** 기준 판매액 */
+  sales: number;
+  /** 클라이언트 정산액 (몫) */
+  clientTake: number;
+  /** KOL RS 지급액 */
+  kolPayout: number;
+  /** 벤더사 마진 (우리) */
+  vendorMargin: number;
+  /** 공구가 기준 추정 수량 (공구가 미입력 시 null) */
+  quantity: number | null;
+}
+
+/**
+ * 특정 판매액을 돈 흐름 모델대로 분배 — 클라이언트/KOL/벤더.
+ * 목표 판매액 시뮬레이션과 상세 페이지 실적 분배가 동일 모델을 쓰도록 단일화.
+ *   RS형:  클라이언트 = 판매액×(1−총RS%), KOL = 판매액×KOL%, 벤더 = 판매액×벤더%
+ *   공급가형: 수량 = 판매액÷공구가, 클라이언트 = 수량×공급가, KOL = 판매액×KOL%, 벤더 = 잔여분
+ */
+export function distributeSales(params: {
+  dealType: DealType;
+  sales: number;
+  gongguPrice: number;
+  supplyPrice: number;
+  influencerRsRate: number; // %
+  vendorFeeRate: number; // %
+  totalRsRate?: number | null; // %
+}): SalesDistribution {
+  const {
+    dealType,
+    sales,
+    gongguPrice,
+    supplyPrice,
+    influencerRsRate,
+    vendorFeeRate,
+    totalRsRate,
+  } = params;
+  const kolPayout = sales * (influencerRsRate / 100);
+  const quantity = gongguPrice > 0 ? Math.round(sales / gongguPrice) : null;
+
+  if (dealType === "rs") {
+    const totalRs =
+      totalRsRate && totalRsRate > 0
+        ? totalRsRate
+        : influencerRsRate + vendorFeeRate;
+    const clientTake = sales * (1 - totalRs / 100);
+    const vendorMargin = sales * (vendorFeeRate / 100);
+    return { sales, clientTake, kolPayout, vendorMargin, quantity };
+  }
+
+  const qty = quantity ?? 0;
+  const clientTake = qty * supplyPrice;
+  const vendorMargin = sales - clientTake - kolPayout;
+  return { sales, clientTake, kolPayout, vendorMargin, quantity };
+}
+
 export const FEASIBILITY_LABEL: Record<Feasibility, string> = {
   possible: "진행 가능",
   conditional: "조건부 진행",

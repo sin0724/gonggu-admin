@@ -90,6 +90,7 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
           shipping_payer: campaign.shipping_payer,
           vat_included: campaign.vat_included,
           exchange_rate: campaign.exchange_rate,
+          target_sales: campaign.target_sales,
           start_date: campaign.start_date,
           end_date: campaign.end_date,
           purchase_form_url: campaign.purchase_form_url,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Campaign, CampaignInsert } from "@/types/database";
@@ -11,6 +11,7 @@ import {
   recommendGongguPrice,
   minPriceForVendorTarget,
   buildPriceScenarios,
+  distributeSales,
   FEASIBILITY,
   FEASIBILITY_LABEL,
   Feasibility,
@@ -67,6 +68,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const [dealType, setDealType] = useState<DealType>(
     campaign?.deal_type === "supply" ? "supply" : "rs"
   );
+  // 가격 입력 통화. 광고주가 TWD로 단가를 주는 경우 NT$로 바로 입력 (저장은 항상 KRW).
+  const [priceCurrency, setPriceCurrency] = useState<"krw" | "twd">("krw");
 
   const [formData, setFormData] = useState({
     client_name: campaign?.client_name ?? "",
@@ -76,6 +79,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     supply_price: campaign?.supply_price?.toString() ?? "",
     gonggu_price: campaign?.gonggu_price?.toString() ?? "",
     exchange_rate: campaign?.exchange_rate?.toString() ?? "",
+    target_sales: campaign?.target_sales?.toString() ?? "",
     total_rs_rate: campaign?.total_rs_rate?.toString() ?? "",
     influencer_rs_rate: campaign?.influencer_rs_rate?.toString() ?? "",
     vendor_fee_rate: campaign?.vendor_fee_rate?.toString() ?? "",
@@ -115,12 +119,57 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   };
 
   // ── 자동 계산 (lib/economics 단일 모델) ─────────────────────
-  const normalPrice = parseFloat(formData.normal_price) || 0;
-  const onlineMinPrice = parseFloat(formData.online_min_price) || 0;
-  const supplyPrice = parseFloat(formData.supply_price) || 0;
-  const gongguPrice = parseFloat(formData.gonggu_price) || 0;
   const exchangeRate = parseFloat(formData.exchange_rate) || 0;
   const rate = exchangeRate > 0 ? exchangeRate : null;
+  // 입력 통화 → KRW (계산·저장은 항상 KRW 기준). KRW → 입력 통화는 그 역.
+  const toKrw = (n: number) =>
+    priceCurrency === "twd" && rate !== null ? n * rate : n;
+  const fromKrw = (n: number) =>
+    priceCurrency === "twd" && rate !== null ? n / rate : n;
+  // 단위 라벨 / 계산된 가격을 입력칸 문자열로 (TWD는 소수 1자리, KRW는 정수)
+  const unitLabel = priceCurrency === "twd" ? "NT$" : "원";
+  const priceToField = (krw: number) => {
+    const v = fromKrw(krw);
+    return priceCurrency === "twd"
+      ? (Math.round(v * 10) / 10).toString()
+      : Math.round(v).toString();
+  };
+
+  // 입력 통화 전환 — 기존에 입력된 가격값을 새 통화로 환산해 표기를 유지.
+  const handlePriceCurrency = (cur: "krw" | "twd") => {
+    if (cur === priceCurrency) return;
+    if (cur === "twd" && rate === null) return; // 환율이 있어야 TWD 입력 가능
+    if (rate !== null) {
+      setFormData((prev) => {
+        const conv = (s: string) => {
+          const v = parseFloat(s);
+          if (!s || isNaN(v)) return s;
+          return cur === "twd"
+            ? (Math.round((v / rate) * 10) / 10).toString()
+            : Math.round(v * rate).toString();
+        };
+        return {
+          ...prev,
+          normal_price: conv(prev.normal_price),
+          online_min_price: conv(prev.online_min_price),
+          supply_price: conv(prev.supply_price),
+          gonggu_price: conv(prev.gonggu_price),
+          target_sales: conv(prev.target_sales),
+        };
+      });
+    }
+    setPriceCurrency(cur);
+  };
+
+  // 환율을 지우면 TWD 입력을 유지할 수 없으므로 원화 입력으로 되돌림.
+  useEffect(() => {
+    if (rate === null && priceCurrency === "twd") setPriceCurrency("krw");
+  }, [rate, priceCurrency]);
+
+  const normalPrice = toKrw(parseFloat(formData.normal_price) || 0);
+  const onlineMinPrice = toKrw(parseFloat(formData.online_min_price) || 0);
+  const supplyPrice = toKrw(parseFloat(formData.supply_price) || 0);
+  const gongguPrice = toKrw(parseFloat(formData.gonggu_price) || 0);
   // 헤드라인 금액 — TWD 메인 · 원화 보조 ("NT$690 · 30,000원"), 환율 없으면 원화만
   const moneyText = (n: number) => {
     const t = krwToTwd(n, rate);
@@ -144,6 +193,21 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     onlineMinPrice,
   };
   const econ = computeUnitEconomics(econInput);
+
+  // 목표 KPI — 목표 판매액(입력 통화 → KRW)을 돈 흐름 모델대로 분배
+  const targetSales = toKrw(parseFloat(formData.target_sales) || 0);
+  const targetDist =
+    targetSales > 0
+      ? distributeSales({
+          dealType,
+          sales: targetSales,
+          gongguPrice,
+          supplyPrice,
+          influencerRsRate,
+          vendorFeeRate,
+          totalRsRate: totalRsRate > 0 ? totalRsRate : null,
+        })
+      : null;
 
   // [공급가형] 추천 공구가 (벤더 목표 마진 기준)
   const rec =
@@ -222,15 +286,17 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         client_name: formData.client_name,
         campaign_name: formData.campaign_name,
         deal_type: dealType,
-        normal_price: formData.normal_price ? parseFloat(formData.normal_price) : null,
-        online_min_price: formData.online_min_price ? parseFloat(formData.online_min_price) : null,
+        // 입력 단위가 NT$여도 저장은 항상 KRW (normalPrice 등은 이미 KRW로 환산된 값)
+        normal_price: formData.normal_price ? Math.round(normalPrice) : null,
+        online_min_price: formData.online_min_price ? Math.round(onlineMinPrice) : null,
         // RS형은 공급가가 파생값이므로 저장하지 않음
         supply_price:
           dealType === "supply" && formData.supply_price
-            ? parseFloat(formData.supply_price)
+            ? Math.round(supplyPrice)
             : null,
-        gonggu_price: formData.gonggu_price ? parseFloat(formData.gonggu_price) : null,
+        gonggu_price: formData.gonggu_price ? Math.round(gongguPrice) : null,
         exchange_rate: formData.exchange_rate ? parseFloat(formData.exchange_rate) : null,
+        target_sales: formData.target_sales ? Math.round(targetSales) : null,
         total_rs_rate: formData.total_rs_rate ? parseFloat(formData.total_rs_rate) : null,
         vendor_fee_rate: formData.vendor_fee_rate ? parseFloat(formData.vendor_fee_rate) : null,
         influencer_rs_rate: formData.influencer_rs_rate ? parseFloat(formData.influencer_rs_rate) : null,
@@ -414,6 +480,44 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
 
         {/* ── 기본 입력값 ── */}
         <div className="space-y-4 mb-6">
+          {/* 가격 입력 통화 토글 — 광고주가 TWD로 단가를 주면 NT$로 바로 입력 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-gray-500">가격 입력 단위</span>
+            <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => handlePriceCurrency("krw")}
+                className={`px-3 py-1.5 text-xs font-medium ${
+                  priceCurrency === "krw"
+                    ? "bg-primary-600 text-white"
+                    : "bg-white text-gray-600"
+                }`}
+              >
+                원 (KRW)
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePriceCurrency("twd")}
+                disabled={rate === null}
+                title={rate === null ? "환율을 먼저 입력하세요" : undefined}
+                className={`px-3 py-1.5 text-xs font-medium ${
+                  priceCurrency === "twd"
+                    ? "bg-primary-600 text-white"
+                    : "bg-white text-gray-600"
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                NT$ (TWD)
+              </button>
+            </div>
+            <span className="text-xs text-gray-400">
+              {rate === null
+                ? "환율 입력 시 NT$로도 가격을 입력할 수 있습니다."
+                : priceCurrency === "twd"
+                ? `NT$로 입력 → 저장은 원화로 환산 (환율 ${fmt(rate)}원/NT$)`
+                : "원화로 입력 중"}
+            </span>
+          </div>
+
           {/* 가격 */}
           <div
             className={`grid grid-cols-2 gap-4 ${
@@ -421,7 +525,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             }`}
           >
             <div>
-              <label className="label">정상가 (원)</label>
+              <label className="label">정상가 ({unitLabel})</label>
               <input
                 type="number"
                 name="normal_price"
@@ -434,7 +538,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               <PriceCaption value={normalPrice} rate={rate} suffix="· 소비자 정상 판매가" />
             </div>
             <div>
-              <label className="label">온라인 최저가 (원)</label>
+              <label className="label">온라인 최저가 ({unitLabel})</label>
               <input
                 type="number"
                 name="online_min_price"
@@ -448,7 +552,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             </div>
             {dealType === "supply" && (
               <div>
-                <label className="label">공급가 (원)</label>
+                <label className="label">공급가 ({unitLabel})</label>
                 <input
                   type="number"
                   name="supply_price"
@@ -466,7 +570,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               </div>
             )}
             <div>
-              <label className="label">공구가 (원)</label>
+              <label className="label">공구가 ({unitLabel})</label>
               <input
                 type="number"
                 name="gonggu_price"
@@ -725,7 +829,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                       onClick={() =>
                         setFormData((prev) => ({
                           ...prev,
-                          gonggu_price: rsMinPrice.toString(),
+                          gonggu_price: priceToField(rsMinPrice),
                         }))
                       }
                       className="btn-secondary btn-sm mb-0.5"
@@ -822,7 +926,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           onClick={() =>
                             setFormData((prev) => ({
                               ...prev,
-                              gonggu_price: recommendedPrice.toString(),
+                              gonggu_price: priceToField(recommendedPrice),
                             }))
                           }
                           className="btn-secondary btn-sm mb-0.5"
@@ -992,8 +1096,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                     가격 메리트 부족
                   </p>
                   <p className="text-xs text-orange-600 mt-0.5">
-                    소비자 실결제가({fmt(econ.consumerPrice)}원)가 온라인 최저가(
-                    {fmt(onlineMinPrice)}원) 이상입니다. 공동구매의 전제가
+                    소비자 실결제가({moneyText(econ.consumerPrice)})가 온라인 최저가(
+                    {moneyText(onlineMinPrice)}) 이상입니다. 공동구매의 전제가
                     무너집니다.
                   </p>
                 </div>
@@ -1019,7 +1123,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           {fmtRate(econ.normalDiscountRate)}%
                         </p>
                         <p className="text-xs text-gray-400 mt-1">
-                          {fmt(normalPrice)}원 → {fmt(econ.consumerPrice)}원
+                          {moneyText(normalPrice)} → {moneyText(econ.consumerPrice)}
                         </p>
                       </div>
                     )}
@@ -1044,7 +1148,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           {fmtRate(econ.onlineMinDiscountRate)}%
                         </p>
                         <p className="text-xs text-gray-400 mt-1">
-                          {fmt(onlineMinPrice)}원 → {fmt(econ.consumerPrice)}원
+                          {moneyText(onlineMinPrice)} → {moneyText(econ.consumerPrice)}
                         </p>
                       </div>
                     )}
@@ -1063,7 +1167,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                     <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-200 text-sm">
                       <span className="text-gray-600">공구가</span>
                       <span className="font-semibold text-gray-900">
-                        +{fmt(gongguPrice)}원
+                        +{moneyText(gongguPrice)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-200 text-sm">
@@ -1073,7 +1177,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           : "공급가 차감 (클라이언트 몫)"}
                       </span>
                       <span className="font-semibold text-red-500">
-                        -{fmt(econ.clientTakePerUnit)}원
+                        -{moneyText(econ.clientTakePerUnit)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-300 text-sm">
@@ -1089,7 +1193,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                             : "text-red-600"
                         }`}
                       >
-                        {fmt(econ.availablePool ?? 0)}원
+                        {moneyText(econ.availablePool ?? 0)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-200 text-sm">
@@ -1097,7 +1201,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                         KOL RS 차감 (공구가 × {influencerRsRate}%)
                       </span>
                       <span className="font-semibold text-purple-600">
-                        -{fmt(econ.kolPerUnit)}원
+                        -{moneyText(econ.kolPerUnit)}
                       </span>
                     </div>
                     <div
@@ -1152,16 +1256,26 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           벤더사 마진 (우리)
                         </p>
                         <p className="text-lg font-bold text-blue-700 mt-1">
-                          {fmt(econ.vendorMarginPerUnit)}원
+                          {rate !== null
+                            ? formatTwd(krwToTwd(econ.vendorMarginPerUnit, rate)!)
+                            : `${fmt(econ.vendorMarginPerUnit)}원`}
                         </p>
-                        <p className="text-xs text-blue-400">{vendorFeeRate}%</p>
+                        <p className="text-xs text-blue-400">
+                          {rate !== null && `${fmt(econ.vendorMarginPerUnit)}원 · `}
+                          {vendorFeeRate}%
+                        </p>
                       </div>
                       <div className="bg-white rounded-lg p-3 border border-gray-200">
                         <p className="text-xs text-gray-400">KOL 수익</p>
                         <p className="text-lg font-bold text-purple-600 mt-1">
-                          {fmt(econ.kolPerUnit)}원
+                          {rate !== null
+                            ? formatTwd(krwToTwd(econ.kolPerUnit, rate)!)
+                            : `${fmt(econ.kolPerUnit)}원`}
                         </p>
-                        <p className="text-xs text-gray-400">{influencerRsRate}%</p>
+                        <p className="text-xs text-gray-400">
+                          {rate !== null && `${fmt(econ.kolPerUnit)}원 · `}
+                          {influencerRsRate}%
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -1186,8 +1300,15 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                             : "text-red-500"
                         }`}
                       >
-                        {fmt(econ.kolPerUnit)}원
+                        {rate !== null
+                          ? formatTwd(krwToTwd(econ.kolPerUnit, rate)!)
+                          : `${fmt(econ.kolPerUnit)}원`}
                       </p>
+                      {rate !== null && (
+                        <p className="text-xs text-gray-400">
+                          {fmt(econ.kolPerUnit)}원
+                        </p>
+                      )}
                     </div>
                     <div className="text-right">
                       <span
@@ -1263,6 +1384,138 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               </div>
             )}
           </div>
+        )}
+      </div>
+
+      {/* 목표 KPI · 재원 분배 시뮬레이션 */}
+      <div className="card p-6">
+        <h2 className="text-base font-semibold text-gray-900 mb-1">
+          목표 KPI · 재원 분배 시뮬레이션
+        </h2>
+        <p className="text-xs text-gray-400 mb-4">
+          목표 판매액을 입력하면 클라이언트·KOL·벤더사(우리)에게 각각 얼마가
+          분배되는지 한눈에 보여줍니다. (현재 가격·RS 구조 기준)
+        </p>
+
+        <div className="flex flex-wrap items-end gap-3 mb-5">
+          <div>
+            <label className="label">목표 판매액 ({unitLabel})</label>
+            <input
+              type="number"
+              name="target_sales"
+              value={formData.target_sales}
+              onChange={handleChange}
+              className="input w-52"
+              placeholder={priceCurrency === "twd" ? "예: 2,300,000" : "예: 100,000,000"}
+              min="0"
+            />
+            {targetSales > 0 && (
+              <p className="text-xs text-gray-400 mt-1">= {moneyText(targetSales)}</p>
+            )}
+          </div>
+          {priceCurrency === "krw" && (
+            <div className="flex items-center gap-1.5">
+              {[50_000_000, 100_000_000, 300_000_000].map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() =>
+                    setFormData((prev) => ({ ...prev, target_sales: v.toString() }))
+                  }
+                  className="btn-secondary btn-sm"
+                >
+                  {v / 100_000_000 >= 1
+                    ? `${v / 100_000_000}억`
+                    : `${v / 10_000_000}천만`}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {targetDist ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="card p-4 bg-gray-50">
+              <p className="text-xs text-gray-400 mb-1">목표 판매액</p>
+              <p className="text-lg font-bold text-gray-900">
+                {rate !== null
+                  ? formatTwd(krwToTwd(targetDist.sales, rate)!)
+                  : `${fmt(targetDist.sales)}원`}
+              </p>
+              {rate !== null && (
+                <p className="text-xs text-gray-400">{fmt(targetDist.sales)}원</p>
+              )}
+              {targetDist.quantity !== null && (
+                <p className="text-xs text-gray-400 mt-0.5">
+                  추정 {fmt(targetDist.quantity)}개
+                </p>
+              )}
+            </div>
+
+            <div className="card p-4 border-green-200 bg-green-50">
+              <p className="text-xs text-green-600 font-medium mb-1">
+                클라이언트 정산액
+              </p>
+              <p className="text-lg font-bold text-green-700">
+                {rate !== null
+                  ? formatTwd(krwToTwd(targetDist.clientTake, rate)!)
+                  : `${fmt(targetDist.clientTake)}원`}
+              </p>
+              <p className="text-xs text-green-500">
+                {rate !== null && `${fmt(targetDist.clientTake)}원 · `}
+                판매액의{" "}
+                {targetSales > 0
+                  ? fmtRate((targetDist.clientTake / targetSales) * 100)
+                  : "0"}
+                %
+              </p>
+            </div>
+
+            <div className="card p-4">
+              <p className="text-xs text-gray-400 mb-1">KOL RS 지급액</p>
+              <p className="text-lg font-bold text-purple-600">
+                {rate !== null
+                  ? formatTwd(krwToTwd(targetDist.kolPayout, rate)!)
+                  : `${fmt(targetDist.kolPayout)}원`}
+              </p>
+              <p className="text-xs text-gray-400">
+                {rate !== null && `${fmt(targetDist.kolPayout)}원 · `}
+                판매액의{" "}
+                {targetSales > 0
+                  ? fmtRate((targetDist.kolPayout / targetSales) * 100)
+                  : "0"}
+                %
+              </p>
+            </div>
+
+            <div className="card p-4 border-blue-200 bg-blue-50">
+              <p className="text-xs text-blue-600 font-medium mb-1">
+                벤더사 마진 (우리)
+              </p>
+              <p
+                className={`text-lg font-bold ${
+                  targetDist.vendorMargin >= 0 ? "text-blue-700" : "text-red-600"
+                }`}
+              >
+                {rate !== null
+                  ? formatTwd(krwToTwd(targetDist.vendorMargin, rate)!)
+                  : `${fmt(targetDist.vendorMargin)}원`}
+              </p>
+              <p className="text-xs text-blue-500">
+                {rate !== null && `${fmt(targetDist.vendorMargin)}원 · `}
+                판매액의{" "}
+                {targetSales > 0
+                  ? fmtRate((targetDist.vendorMargin / targetSales) * 100)
+                  : "0"}
+                %
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">
+            목표 판매액과 가격·RS 구조(공구가·RS율 등)를 입력하면 분배 결과가
+            표시됩니다.
+          </p>
         )}
       </div>
 

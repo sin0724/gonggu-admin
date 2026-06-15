@@ -10,6 +10,7 @@ import {
   krwToTwd,
 } from "@/lib/utils";
 import InfluencerTable from "@/components/influencers/influencer-table";
+import { distributeSales } from "@/lib/economics";
 import { CampaignInfluencerWithDetails } from "@/types/database";
 
 /** KPI 카드용 금액 — TWD를 메인으로, 원화를 보조로 표기. 환율 없으면 원화만. */
@@ -124,6 +125,23 @@ export default async function CampaignDetailPage({
   const notUploadedCount = records.filter((r) => r.is_product_sent && !r.is_uploaded).length;
   const notSettledCount = records.filter((r) => r.is_uploaded && !r.is_settled).length;
 
+  // 목표 KPI — 목표 판매액 분배 + 달성률
+  const targetSales = campaign.target_sales ?? 0;
+  const targetDist =
+    targetSales > 0
+      ? distributeSales({
+          dealType,
+          sales: targetSales,
+          gongguPrice: campaign.gonggu_price ?? 0,
+          supplyPrice,
+          influencerRsRate,
+          vendorFeeRate,
+          totalRsRate: campaign.total_rs_rate ?? null,
+        })
+      : null;
+  const achievementRate =
+    targetSales > 0 ? Math.min(100, (totalSales / targetSales) * 100) : 0;
+
   return (
     <div className="space-y-5">
       {/* 브레드크럼 */}
@@ -228,6 +246,79 @@ export default async function CampaignDetailPage({
           )}
         </div>
       </div>
+
+      {/* 목표 KPI · 재원 분배 */}
+      {targetDist && (
+        <div className="card p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 className="text-base font-semibold text-gray-900">
+              목표 KPI · 재원 분배
+            </h2>
+            <span className="text-sm text-gray-500">
+              목표 판매액{" "}
+              <b className="text-gray-900">{formatMoney(targetSales, rate)}</b>
+              {targetDist.quantity !== null &&
+                ` · 추정 ${targetDist.quantity.toLocaleString("ko-KR")}개`}
+            </span>
+          </div>
+
+          {/* 달성률 */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-gray-500">
+                목표 달성률 ·{" "}
+                <span className="font-semibold text-gray-700">
+                  {(targetSales > 0 ? (totalSales / targetSales) * 100 : 0).toFixed(1)}%
+                </span>
+              </span>
+              <span className="text-gray-400">
+                {formatMoney(totalSales, rate)} / {formatMoney(targetSales, rate)}
+              </span>
+            </div>
+            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary-500 rounded-full"
+                style={{ width: `${achievementRate}%` }}
+              />
+            </div>
+          </div>
+
+          {/* 목표 달성 시 분배 */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="card p-4 border-green-200 bg-green-50">
+              <p className="text-xs text-green-600 font-medium mb-1">
+                클라이언트 정산액 (목표)
+              </p>
+              <MoneyKpi
+                krw={targetDist.clientTake}
+                rate={rate}
+                className="text-xl font-bold text-green-700"
+                unitClassName="text-xs font-normal text-green-400 ml-0.5"
+              />
+            </div>
+            <div className="card p-4">
+              <p className="text-xs text-gray-400 mb-1">KOL RS 지급액 (목표)</p>
+              <MoneyKpi
+                krw={targetDist.kolPayout}
+                rate={rate}
+                className="text-xl font-bold text-purple-600"
+                unitClassName="text-xs font-normal text-gray-400 ml-0.5"
+              />
+            </div>
+            <div className="card p-4 border-blue-200 bg-blue-50">
+              <p className="text-xs text-blue-600 font-medium mb-1">
+                벤더사 마진 (목표 · 우리)
+              </p>
+              <MoneyKpi
+                krw={targetDist.vendorMargin}
+                rate={rate}
+                className={`text-xl font-bold ${targetDist.vendorMargin >= 0 ? "text-blue-700" : "text-red-600"}`}
+                unitClassName="text-xs font-normal text-blue-400 ml-0.5"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ② KPI 한 줄 */}
       {records.length > 0 && (

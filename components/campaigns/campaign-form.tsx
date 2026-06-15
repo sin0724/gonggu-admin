@@ -10,7 +10,6 @@ import {
   judgeFeasibility,
   recommendGongguPrice,
   minPriceForVendorTarget,
-  buildPriceScenarios,
   distributeSales,
   FEASIBILITY,
   FEASIBILITY_LABEL,
@@ -270,16 +269,6 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           vendorFeeRatePct: vendorFeeRate,
         })
       : null;
-
-  // 시나리오 테이블 (현재 공구가 또는 추천가 중심)
-  const hasRsStructure =
-    influencerRsRate > 0 || vendorFeeRate > 0 || totalRsRate > 0;
-  const scenarioCenter = gongguPrice > 0 ? gongguPrice : recommendedPrice;
-  const scenarios =
-    scenarioCenter > 0 &&
-    (dealType === "supply" ? supplyPrice > 0 : hasRsStructure)
-      ? buildPriceScenarios(econInput, scenarioCenter)
-      : [];
 
   // 최종 판정
   const showAnalysis = gongguPrice > 0;
@@ -1023,90 +1012,6 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               {targetMarginUnit === "pct" ? " − 목표마진율" : ") − 목표마진"}
               {targetMarginUnit === "pct" && ")"}
             </p>
-          </div>
-        )}
-
-        {/* ── 공구가 시나리오 비교 ── */}
-        {scenarios.length > 0 && (
-          <div className="mb-5 overflow-x-auto">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-              공구가 시나리오 비교
-            </p>
-            <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium text-gray-500">공구가</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500">
-                    최저가 대비
-                  </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500">
-                    가용 재원/건
-                  </th>
-                  <th className="px-3 py-2 text-right font-medium text-purple-600">
-                    KOL 수익/건
-                  </th>
-                  <th className="px-3 py-2 text-right font-medium text-blue-600">
-                    벤더 마진/건
-                  </th>
-                  <th className="px-3 py-2 text-center font-medium text-gray-500">판정</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {scenarios.map((s) => (
-                  <tr
-                    key={s.econ.gongguPrice}
-                    className={s.isCurrent ? "bg-blue-50 font-semibold" : "bg-white"}
-                  >
-                    <td className="px-3 py-2">
-                      {fmt(s.econ.gongguPrice)}원
-                      {s.isCurrent && (
-                        <span className="ml-1 text-blue-500 text-[10px]">현재</span>
-                      )}
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right ${
-                        s.econ.hasNoPriceMerit ? "text-orange-500" : "text-blue-600"
-                      }`}
-                    >
-                      {onlineMinPrice > 0
-                        ? `${fmtRate(s.econ.onlineMinDiscountRate)}%`
-                        : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right text-gray-700">
-                      {s.econ.availablePool !== null
-                        ? `${fmt(s.econ.availablePool)}원`
-                        : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right text-purple-700">
-                      {fmt(s.econ.kolPerUnit)}원
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right ${
-                        s.econ.vendorMarginPerUnit >= 0
-                          ? "text-blue-700"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {fmt(s.econ.vendorMarginPerUnit)}원 (
-                      {fmtRate(s.econ.vendorMarginRate)}%)
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <span
-                        className={`badge ${
-                          s.feasibility === "possible"
-                            ? "bg-green-100 text-green-700"
-                            : s.feasibility === "conditional"
-                            ? "bg-yellow-100 text-yellow-700"
-                            : "bg-red-100 text-red-700"
-                        }`}
-                      >
-                        {FEASIBILITY_LABEL[s.feasibility]}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         )}
 

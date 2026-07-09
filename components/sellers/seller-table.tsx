@@ -8,18 +8,19 @@ import { formatWon, formatTwd, krwToTwd } from "@/lib/utils";
 import { resolveTierPrice } from "@/lib/economics";
 
 // 캠페인별 셀러 관리 — 대만 총판/개별 셀러/공동구매 업체를 "셀러"로 통일.
-// 셀러가 우리에게 견적 단가(부가세 포함)로 구매해가서 판매하는 채널.
-// 공급액(우리 매출) = 수량 × 견적 단가, 마진 = 수량 × (견적 단가 − 공급가).
+// 셀러가 우리에게 견적 단가(수출 영세율 0%)로 구매해가서 판매하는 채널.
+// 공급액(우리 매출) = 수량 × 견적 단가,
+// 마진 = 수량 × (견적 단가 − 공급 실질 원가[부가세 매입이면 ÷1.1]).
 
 interface SellerTableProps {
   campaignId: string;
   sellers: CampaignSeller[];
-  /** 캠페인 기본 셀러 견적가 (부가세 포함, 원). 0이면 미설정 */
+  /** 캠페인 기본 셀러 견적가 (영세율 0%, 원). 0이면 미설정 */
   campaignQuotePrice: number;
   /** 캠페인 견적가 수량 구간 */
   quoteTiers: PriceTier[];
-  /** 구간 반영된 브랜드 공급가/개 (총수량 기준). 0이면 마진 계산 불가 */
-  effectiveSupplyPrice: number;
+  /** 구간·과세 구분 반영된 공급 실질 원가/개 (총수량 기준). 0이면 마진 계산 불가 */
+  effectiveSupplyCost: number;
   exchangeRate: number | null;
 }
 
@@ -54,7 +55,7 @@ export default function SellerTable({
   sellers,
   campaignQuotePrice,
   quoteTiers,
-  effectiveSupplyPrice,
+  effectiveSupplyCost,
   exchangeRate,
 }: SellerTableProps) {
   const router = useRouter();
@@ -83,10 +84,10 @@ export default function SellerTable({
     0
   );
   const totalMargin =
-    effectiveSupplyPrice > 0
+    effectiveSupplyCost > 0
       ? sellers.reduce(
           (sum, s) =>
-            sum + (s.quantity || 0) * (effQuoteFor(s) - effectiveSupplyPrice),
+            sum + (s.quantity || 0) * (effQuoteFor(s) - effectiveSupplyCost),
           0
         )
       : 0;
@@ -118,34 +119,58 @@ export default function SellerTable({
     setShowModal(true);
   };
 
+  // 입금 상태 변경은 API 경유 — 재무관리(공구 사업부 실적)에 자동 기록/제거
+  const syncPaid = async (sellerId: string, paid: boolean) => {
+    const res = await fetch("/api/seller-paid", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sellerId, paid }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? "입금 처리 실패");
+    if (json.warning) alert(json.warning);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
       const supabase = createClient();
+      // is_paid는 API(재무 연동)가 관리 — 저장 후 변경분만 동기화
       const payload = {
         campaign_id: campaignId,
         name: form.name.trim(),
         contact: form.contact.trim() || null,
         quantity: parseInt(form.quantity, 10) || 0,
         quote_price: form.quote_price ? Math.round(parseFloat(form.quote_price)) : null,
-        is_paid: form.is_paid,
-        paid_date: form.is_paid
-          ? editRecord?.paid_date ?? new Date().toISOString().slice(0, 10)
-          : null,
         notes: form.notes.trim() || null,
       };
-      const { error } = editRecord
-        ? await supabase
-            .from("campaign_sellers")
-            .update(payload)
-            .eq("id", editRecord.id)
-        : await supabase.from("campaign_sellers").insert(payload);
-      if (error) throw error;
+      let sellerId = editRecord?.id;
+      if (editRecord) {
+        const { error } = await supabase
+          .from("campaign_sellers")
+          .update(payload)
+          .eq("id", editRecord.id);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from("campaign_sellers")
+          .insert(payload)
+          .select("id")
+          .single();
+        if (error) throw error;
+        sellerId = data.id;
+      }
+      // 입금 체크가 바뀌었으면 재무 실적 동기화. 수량·단가가 바뀐 기존 입금 건도
+      // 재기록해서 재무 금액이 최신 조건을 따라가게 한다.
+      const wasPaid = editRecord?.is_paid ?? false;
+      if (sellerId && (form.is_paid !== wasPaid || form.is_paid)) {
+        await syncPaid(sellerId, form.is_paid);
+      }
       setShowModal(false);
       router.refresh();
-    } catch {
-      alert("저장 중 오류가 발생했습니다.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "저장 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
@@ -172,20 +197,10 @@ export default function SellerTable({
   const handleTogglePaid = async (s: CampaignSeller) => {
     setTogglingId(s.id);
     try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("campaign_sellers")
-        .update({
-          is_paid: !s.is_paid,
-          paid_date: !s.is_paid
-            ? s.paid_date ?? new Date().toISOString().slice(0, 10)
-            : null,
-        })
-        .eq("id", s.id);
-      if (error) throw error;
+      await syncPaid(s.id, !s.is_paid);
       router.refresh();
-    } catch {
-      alert("업데이트 중 오류가 발생했습니다.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "업데이트 중 오류가 발생했습니다.");
     } finally {
       setTogglingId(null);
     }
@@ -198,7 +213,8 @@ export default function SellerTable({
           <h2 className="text-base font-semibold text-gray-900">
             셀러 관리
             <span className="ml-2 text-xs font-normal text-gray-400">
-              총판 · 개별 셀러 · 공동구매 업체 (부가세 포함 단가)
+              총판 · 개별 셀러 · 공동구매 업체 (견적 단가 영세율 0%) · 입금 체크
+              시 재무 공구 사업부 실적에 자동 반영
             </span>
           </h2>
         </div>
@@ -219,7 +235,7 @@ export default function SellerTable({
                 <th className="table-header text-right">수량 (세트)</th>
                 <th className="table-header text-right">견적 단가/개</th>
                 <th className="table-header text-right">공급액 (우리 매출)</th>
-                <th className="table-header text-right">마진 (−공급가)</th>
+                <th className="table-header text-right">마진 (−실질 원가)</th>
                 <th className="table-header text-center">입금</th>
                 <th className="table-header hidden md:table-cell">메모</th>
                 <th className="table-header text-right">관리</th>
@@ -238,8 +254,8 @@ export default function SellerTable({
                   const quote = effQuoteFor(s);
                   const revenue = (s.quantity || 0) * quote;
                   const margin =
-                    effectiveSupplyPrice > 0
-                      ? (s.quantity || 0) * (quote - effectiveSupplyPrice)
+                    effectiveSupplyCost > 0
+                      ? (s.quantity || 0) * (quote - effectiveSupplyCost)
                       : null;
                   return (
                     <tr key={s.id} className="hover:bg-gray-50 transition-colors">
@@ -346,7 +362,7 @@ export default function SellerTable({
                     <Money krw={totalRevenue} rate={exchangeRate} />
                   </td>
                   <td className="table-cell text-right">
-                    {effectiveSupplyPrice > 0 ? (
+                    {effectiveSupplyCost > 0 ? (
                       <Money
                         krw={totalMargin}
                         rate={exchangeRate}
@@ -410,7 +426,7 @@ export default function SellerTable({
                 />
               </div>
               <div>
-                <label className="label">견적 단가 (원 · VAT 포함)</label>
+                <label className="label">견적 단가 (원 · 영세율 0%)</label>
                 <input
                   type="number"
                   value={form.quote_price}
@@ -450,7 +466,10 @@ export default function SellerTable({
                 onChange={(e) => setForm({ ...form, is_paid: e.target.checked })}
                 className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
-              입금 완료
+              입금 완료{" "}
+              <span className="text-xs text-gray-400">
+                — 체크 시 재무관리 공구 사업부 실적에 공급액·마진 자동 기록
+              </span>
             </label>
             <div className="flex items-center justify-end gap-3 pt-2">
               <button

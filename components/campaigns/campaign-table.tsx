@@ -82,6 +82,7 @@ export default function CampaignTable({ campaigns }: CampaignTableProps) {
           normal_price: campaign.normal_price,
           online_min_price: campaign.online_min_price,
           supply_price: campaign.supply_price,
+          supply_vat_mode: campaign.supply_vat_mode,
           supply_price_tiers: campaign.supply_price_tiers,
           seller_quote_price: campaign.seller_quote_price,
           seller_quote_tiers: campaign.seller_quote_tiers,

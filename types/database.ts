@@ -64,6 +64,8 @@ export interface Campaign {
   normal_price: number | null;
   online_min_price: number | null;
   supply_price: number | null;
+  /** [공급가형] 공급가 과세 구분: taxed = 부가세 포함 10% (실질 원가 ÷1.1), zero = 영세율 0% (구매확인서) */
+  supply_vat_mode: "taxed" | "zero" | null;
   /** [공급가형] 브랜드 공급가 수량 구간. 빈 배열이면 supply_price 단일가 */
   supply_price_tiers: PriceTier[] | null;
   /** [공급가형] 대만 총판/셀러에게 견적(공급)한 개당 단가(원). NULL이면 공구가 직접 판매로 간주. 벤더 마진 = 견적가 − 공급가 − KOL RS */

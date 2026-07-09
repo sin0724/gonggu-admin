@@ -21,9 +21,28 @@
 //  - 클라이언트의 원가·마진은 우리가 알 수 없고 판단 대상이 아니다.
 //  - 공구가는 온라인 최저가보다 싸야 메리트가 있다.
 //  - 배송비는 판매자 부담이어도 클라이언트 몫에서 나가므로 마진 계산에 미반영.
-//  - 모든 가격(정상가·최저가·공급가·견적가·공구가)은 부가세 포함 기준으로 통일.
+//
+// 부가세 기준:
+//  - 정상가·최저가·공구가: 부가세 포함.
+//  - 셀러 견적가(우리 → 대만 셀러): 수출 영세율 0% — 부가세 없음.
+//  - 공급가(브랜드 → 우리): 기본 부가세 포함 10%(taxed) — 매입세액공제로
+//    실질 원가 = 공급가 ÷ 1.1. 브랜드가 구매확인서로 영세 공급하면 0%(zero) —
+//    공급가가 곧 실질 원가. 마진 계산은 항상 실질 원가 기준.
+//    (브랜드에 실제 지불하는 정산액은 공급가 그대로)
 
 export type DealType = "rs" | "supply";
+
+// ── 공급가 과세 구분 ────────────────────────────────────────
+/** taxed = 부가세 포함 10% (실질 원가 = ÷1.1), zero = 영세율 0% (구매확인서) */
+export type SupplyVatMode = "taxed" | "zero";
+
+/** 공급가의 실질 원가 — 부가세 포함 매입이면 매입세액공제 반영(÷1.1) */
+export function supplyNetCost(
+  supplyPrice: number,
+  mode: SupplyVatMode = "taxed"
+): number {
+  return mode === "taxed" ? supplyPrice / 1.1 : supplyPrice;
+}
 
 // ── 수량 구간별 단가 ────────────────────────────────────────
 // 브랜드 공급가·셀러 견적가 모두 "N세트 이상이면 개당 얼마" 식으로
@@ -71,7 +90,8 @@ export interface TierMarginRow {
 export function buildTierMarginRows(params: {
   supplyPrice: number;
   supplyTiers?: PriceTier[] | null;
-  /** 기본 견적가. 0이면 공구가 직접 판매 기준 */
+  supplyVatMode?: SupplyVatMode;
+  /** 기본 견적가 (영세율 0%). 0이면 공구가 직접 판매 기준 */
   quotePrice: number;
   quoteTiers?: PriceTier[] | null;
   gongguPrice: number;
@@ -80,6 +100,7 @@ export function buildTierMarginRows(params: {
   const {
     supplyPrice,
     supplyTiers,
+    supplyVatMode,
     quotePrice,
     quoteTiers,
     gongguPrice,
@@ -100,7 +121,8 @@ export function buildTierMarginRows(params: {
     .map((q) => {
       const s = resolveTierPrice(supplyPrice, supplyTiers, q);
       const c = resolveTierPrice(baseQuote, quoteTiers, q);
-      const marginPerUnit = c - s;
+      // 마진은 공급가 실질 원가(매입세액공제 반영) 기준
+      const marginPerUnit = c - supplyNetCost(s, supplyVatMode);
       const netMarginPerUnit = marginPerUnit - kolPerUnit;
       return {
         minQty: q,
@@ -132,8 +154,10 @@ export interface EconomicsInput {
   gongguPrice: number;
   /** 공급가형에서만 사용 (RS형은 파생값) */
   supplyPrice: number;
-  /** [공급가형] 대만 총판/셀러 견적 단가. 0/미입력이면 공구가 직접 판매로 간주 */
+  /** [공급가형] 대만 총판/셀러 견적 단가 (영세율 0%). 0/미입력이면 공구가 직접 판매로 간주 */
   sellerQuotePrice?: number;
+  /** [공급가형] 공급가 과세 구분 (기본 taxed = 부가세 포함) */
+  supplyVatMode?: SupplyVatMode;
   influencerRsRate: number; // %
   vendorFeeRate: number; // %
   totalRsRate?: number | null; // 클라이언트 승인 총 RS(%)
@@ -144,8 +168,10 @@ export interface EconomicsInput {
 export interface UnitEconomics {
   dealType: DealType;
   gongguPrice: number;
-  /** 클라이언트 몫/개 — RS형: 공구가×(1−총RS%), 공급가형: 공급가 */
+  /** 클라이언트 몫/개 — RS형: 공구가×(1−총RS%), 공급가형: 공급가(브랜드에 실지불) */
   clientTakePerUnit: number | null;
+  /** [공급가형] 공급가 실질 원가/개 — taxed면 ÷1.1(매입세액공제), zero면 공급가 그대로 */
+  supplyNetCostPerUnit: number | null;
   /** [공급가형] 유효 셀러 견적가/개 (미입력 시 공구가). RS형은 null */
   sellerQuotePerUnit: number | null;
   /** [공급가형] 셀러 몫/개 = 공구가 − 견적가. 직접 판매(견적가 미입력)면 0 */
@@ -179,6 +205,7 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     gongguPrice,
     supplyPrice,
     sellerQuotePrice = 0,
+    supplyVatMode = "taxed",
     influencerRsRate,
     vendorFeeRate,
     totalRsRate,
@@ -190,6 +217,7 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
   const hasBudget = totalRsRate != null && totalRsRate > 0;
 
   let clientTakePerUnit: number | null = null;
+  let supplyNetCostPerUnit: number | null = null;
   let sellerQuotePerUnit: number | null = null;
   let sellerTakePerUnit: number | null = null;
   let availablePool: number | null = null;
@@ -211,24 +239,27 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     }
     vendorMarginPerUnit = gongguPrice * (vendorFeeRate / 100);
   } else {
-    // 공급가형: 브랜드 공급가에 마진을 붙여 셀러에게 견적. 견적가 − 공급가가 재원.
+    // 공급가형: 브랜드 공급가에 마진을 붙여 셀러에게 견적. 견적가 − 실질 원가가 재원.
+    // 견적가는 수출 영세율 0%. 공급가는 과세 구분에 따라 실질 원가로 환산.
     // 견적가 미입력 시 공구가 직접 판매(견적가 = 공구가)로 간주.
     const hasSupply = supplyPrice > 0 && gongguPrice > 0;
+    const netSupply = supplyNetCost(supplyPrice, supplyVatMode);
     const effectiveQuote = sellerQuotePrice > 0 ? sellerQuotePrice : gongguPrice;
     if (hasSupply) {
       clientTakePerUnit = supplyPrice;
+      supplyNetCostPerUnit = netSupply;
       sellerQuotePerUnit = effectiveQuote;
       sellerTakePerUnit = gongguPrice - effectiveQuote;
-      availablePool = effectiveQuote - supplyPrice;
-      maxRsRate = ((effectiveQuote - supplyPrice) / gongguPrice) * 100;
+      availablePool = effectiveQuote - netSupply;
+      maxRsRate = ((effectiveQuote - netSupply) / gongguPrice) * 100;
     }
     vendorMarginPerUnit = hasSupply
-      ? effectiveQuote - supplyPrice - kolPerUnit
+      ? effectiveQuote - netSupply - kolPerUnit
       : gongguPrice * (vendorFeeRate / 100);
     supplyRsConflict =
       hasBudget && maxRsRate !== null && totalRsRate! > maxRsRate + 0.5;
     quoteBelowSupply =
-      sellerQuotePrice > 0 && supplyPrice > 0 && sellerQuotePrice <= supplyPrice;
+      sellerQuotePrice > 0 && supplyPrice > 0 && sellerQuotePrice <= netSupply;
     quoteAboveGonggu =
       sellerQuotePrice > 0 && gongguPrice > 0 && sellerQuotePrice > gongguPrice;
   }
@@ -243,6 +274,7 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     dealType,
     gongguPrice,
     clientTakePerUnit,
+    supplyNetCostPerUnit,
     sellerQuotePerUnit,
     sellerTakePerUnit,
     availablePool,
@@ -299,51 +331,61 @@ export function judgeFeasibility(e: UnitEconomics): Feasibility {
 }
 
 /**
- * [공급가형] 추천 공구가: 벤더 목표 마진을 보장하는 최소 공구가.
- *   목표가 원 단위: 공구가 = (공급가 + 목표마진) ÷ (1 − KOL%)
- *   목표가 % 단위: 공구가 = 공급가 ÷ (1 − KOL% − 목표마진%)
+ * [공급가형] 추천 공구가: 벤더 목표 마진을 보장하는 최소 공구가 (직접 판매 기준).
+ *   목표가 원 단위: 공구가 = (공급 실질원가 + 목표마진) ÷ (1 − KOL%)
+ *   목표가 % 단위: 공구가 = 공급 실질원가 ÷ (1 − KOL% − 목표마진%)
  * 1,000원 단위 올림.
  */
 export function recommendGongguPrice(params: {
   supplyPrice: number;
+  supplyVatMode?: SupplyVatMode;
   kolRsRatePct: number;
   targetVendorMargin: number;
   targetUnit: "won" | "pct";
 }): { raw: number; rounded: number } | null {
-  const { supplyPrice, kolRsRatePct, targetVendorMargin, targetUnit } = params;
+  const { supplyPrice, supplyVatMode, kolRsRatePct, targetVendorMargin, targetUnit } =
+    params;
   if (supplyPrice <= 0) return null;
+  const netSupply = supplyNetCost(supplyPrice, supplyVatMode);
   const denom =
     targetUnit === "won"
       ? 1 - kolRsRatePct / 100
       : 1 - kolRsRatePct / 100 - targetVendorMargin / 100;
   if (denom <= 0) return null;
   const numer =
-    targetUnit === "won" ? supplyPrice + targetVendorMargin : supplyPrice;
+    targetUnit === "won" ? netSupply + targetVendorMargin : netSupply;
   const raw = numer / denom;
   return { raw, rounded: Math.ceil(raw / 1000) * 1000 };
 }
 
 /**
- * [공급가형] 추천 셀러 견적가: 벤더 목표 마진을 보장하는 최소 견적가.
- *   견적가 = 공급가 + KOL RS(공구가 × KOL%) + 목표마진(원 또는 공구가 × %)
+ * [공급가형] 추천 셀러 견적가(영세율 0%): 벤더 목표 마진을 보장하는 최소 견적가.
+ *   견적가 = 공급 실질원가 + KOL RS(공구가 × KOL%) + 목표마진(원 또는 공구가 × %)
  * 100원 단위 올림.
  */
 export function recommendSellerQuote(params: {
   supplyPrice: number;
+  supplyVatMode?: SupplyVatMode;
   gongguPrice: number;
   kolRsRatePct: number;
   targetVendorMargin: number;
   targetUnit: "won" | "pct";
 }): { raw: number; rounded: number } | null {
-  const { supplyPrice, gongguPrice, kolRsRatePct, targetVendorMargin, targetUnit } =
-    params;
+  const {
+    supplyPrice,
+    supplyVatMode,
+    gongguPrice,
+    kolRsRatePct,
+    targetVendorMargin,
+    targetUnit,
+  } = params;
   if (supplyPrice <= 0 || gongguPrice <= 0) return null;
   const kol = gongguPrice * (kolRsRatePct / 100);
   const margin =
     targetUnit === "won"
       ? targetVendorMargin
       : gongguPrice * (targetVendorMargin / 100);
-  const raw = supplyPrice + kol + margin;
+  const raw = supplyNetCost(supplyPrice, supplyVatMode) + kol + margin;
   return { raw, rounded: Math.ceil(raw / 100) * 100 };
 }
 
@@ -421,6 +463,7 @@ export function distributeSales(params: {
   gongguPrice: number;
   supplyPrice: number;
   sellerQuotePrice?: number;
+  supplyVatMode?: SupplyVatMode;
   influencerRsRate: number; // %
   vendorFeeRate: number; // %
   totalRsRate?: number | null; // %
@@ -431,6 +474,7 @@ export function distributeSales(params: {
     gongguPrice,
     supplyPrice,
     sellerQuotePrice = 0,
+    supplyVatMode = "taxed",
     influencerRsRate,
     vendorFeeRate,
     totalRsRate,
@@ -448,15 +492,18 @@ export function distributeSales(params: {
     return { sales, clientTake, kolPayout, vendorMargin, sellerTake: 0, quantity };
   }
 
+  // 공급가형: 브랜드 정산은 공급가 그대로, 우리 마진은 실질 원가(매입세액공제) 기준.
+  // taxed 공급이면 부가세 환급분만큼 분배 합계가 판매액을 초과할 수 있다.
   const qty = quantity ?? 0;
   const clientTake = qty * supplyPrice;
+  const netSupply = supplyNetCost(supplyPrice, supplyVatMode);
   if (sellerQuotePrice > 0) {
-    // 셀러 경유: 우리 매출 = 수량 × 견적가. 브랜드 정산·KOL 지급 후가 우리 마진.
-    const vendorMargin = qty * (sellerQuotePrice - supplyPrice) - kolPayout;
-    const sellerTake = sales - clientTake - kolPayout - vendorMargin;
+    // 셀러 경유: 우리 매출 = 수량 × 견적가(영세율 0%). 셀러 몫 = 판매액 − 견적가분.
+    const vendorMargin = qty * (sellerQuotePrice - netSupply) - kolPayout;
+    const sellerTake = sales - qty * sellerQuotePrice;
     return { sales, clientTake, kolPayout, vendorMargin, sellerTake, quantity };
   }
-  const vendorMargin = sales - clientTake - kolPayout;
+  const vendorMargin = sales - qty * netSupply - kolPayout;
   return { sales, clientTake, kolPayout, vendorMargin, sellerTake: 0, quantity };
 }
 

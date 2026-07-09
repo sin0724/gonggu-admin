@@ -49,21 +49,8 @@ export default async function DashboardPage() {
   const completedSettlement =
     campaignInfluencers?.filter((ci) => ci.is_settled).length ?? 0;
 
-  // 돈 지표 — 벤더사 마진 = 판매액 × 캠페인 벤더수수료%
-  const vendorRateByCampaign = new Map(
-    (campaigns ?? []).map((c) => [c.id, c.vendor_fee_rate ?? 0])
-  );
-  const totalSales =
-    campaignInfluencers?.reduce((sum, ci) => sum + (ci.sales_amount || 0), 0) ??
-    0;
-  const totalVendorMargin =
-    campaignInfluencers?.reduce(
-      (sum, ci) =>
-        sum +
-        (ci.sales_amount || 0) *
-          ((vendorRateByCampaign.get(ci.campaign_id) ?? 0) / 100),
-      0
-    ) ?? 0;
+  // 돈 지표 — 대시보드에는 재무 확정 취급액만 노출.
+  // 벤더사 마진은 캠페인 상세에서만 확인한다 (누적 마진 카드 제거).
   const totalKolPaid =
     campaignInfluencers
       ?.filter((ci) => ci.is_settled)
@@ -76,43 +63,25 @@ export default async function DashboardPage() {
 
   const moneyStats = [
     {
-      label: "총 판매액",
-      value: fmtWon(totalSales),
-      sub: "전체 캠페인 누적",
-      color: "bg-gray-50 text-gray-600",
-      href: "/campaigns",
-    },
-    ...(totalConfirmedSales > 0
-      ? [
-          {
-            label: "확정 취급액",
-            value: fmtWon(totalConfirmedSales),
-            sub: "재무 확정 기준 누적",
-            color: "bg-purple-50 text-purple-600",
-            href: "/campaigns",
-          },
-        ]
-      : []),
-    {
-      label: "벤더사 누적 마진",
-      value: fmtWon(totalVendorMargin),
-      sub: "판매액 × 캠페인별 벤더 %",
-      color: "bg-blue-50 text-blue-600",
+      label: "확정 취급액",
+      value: fmtWon(totalConfirmedSales),
+      sub: "재무관리 시스템 확정 기준 누적",
+      color: "bg-purple-50 text-purple-600",
       href: "/campaigns",
     },
     {
       label: "정산 대기 금액",
       value: fmtWon(pendingSettlementAmount),
-      sub: `${pendingSettlement}건 — KOL 지급 예정`,
+      sub: `${pendingSettlement}건 — KOL 지급 예정 (캠페인별 관리)`,
       color: "bg-orange-50 text-orange-600",
-      href: "/settlements",
+      href: "/campaigns",
     },
     {
       label: "KOL 지급 완료",
       value: fmtWon(totalKolPaid),
       sub: `${completedSettlement}건 정산 완료`,
       color: "bg-green-50 text-green-600",
-      href: "/settlements",
+      href: "/campaigns",
     },
   ];
 
@@ -185,8 +154,8 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* 돈 지표 카드 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 돈 지표 카드 — 마진은 캠페인 상세에서만 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {moneyStats.map((stat) => (
           <Link
             key={stat.label}

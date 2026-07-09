@@ -11,7 +11,12 @@ import {
 } from "@/lib/utils";
 import InfluencerTable from "@/components/influencers/influencer-table";
 import SellerTable from "@/components/sellers/seller-table";
-import { distributeSales, resolveTierPrice } from "@/lib/economics";
+import {
+  distributeSales,
+  resolveTierPrice,
+  supplyNetCost,
+  SupplyVatMode,
+} from "@/lib/economics";
 import {
   CampaignInfluencerWithDetails,
   CampaignSeller,
@@ -139,8 +144,12 @@ export default async function CampaignDetailPage({
   // 브랜드 공급가 구간은 우리 총 발주량(KOL 직접 + 셀러) 기준으로 결정
   const totalQty = quantity + sellerQty;
   const effSupplyPrice = resolveTierPrice(supplyPrice, supplyTiers, totalQty);
+  // 마진은 공급가 실질 원가 기준 — 부가세 포함 매입이면 매입세액공제(÷1.1) 반영
+  const supplyVatMode: SupplyVatMode =
+    campaign.supply_vat_mode === "zero" ? "zero" : "taxed";
+  const effSupplyCost = supplyNetCost(effSupplyPrice, supplyVatMode);
   const sellerMargin =
-    supplyPrice > 0 ? sellerRevenue - sellerQty * effSupplyPrice : 0;
+    supplyPrice > 0 ? sellerRevenue - sellerQty * effSupplyCost : 0;
   const hasSellerChannel = dealType === "supply" && sellers.length > 0;
 
   const isRsDeal = dealType === "rs" && totalRsEff > 0;
@@ -157,20 +166,22 @@ export default async function CampaignDetailPage({
     payoutNote = `판매액 × ${100 - totalRsEff}% (RS형)`;
     vendorNote = `판매액 × 총 RS ${totalRsEff}% − KOL 지급액`;
   } else if (isSupplyDeal) {
+    // 브랜드 정산은 공급가 그대로, 마진은 실질 원가(effSupplyCost) 기준
     clientPayout = totalQty * effSupplyPrice;
+    const vatNote = supplyVatMode === "taxed" ? " · 실질 원가(÷1.1) 기준" : "";
     if (hasSellerChannel) {
       // 셀러 등록됨: KOL 직접 판매 채널 + 셀러 공급 채널을 합산
       const kolChannelMargin =
-        totalSales - quantity * effSupplyPrice - totalKolRs;
+        totalSales - quantity * effSupplyCost - totalKolRs;
       totalVendorMargin = kolChannelMargin + sellerMargin;
-      vendorNote = `KOL 직접(판매액 − 수량×공급가 − RS) + 셀러(수량×(견적가 − 공급가))${isQuantityEstimated ? " · KOL 수량 추정" : ""}`;
+      vendorNote = `KOL 직접(판매액 − 수량×원가 − RS) + 셀러(수량×(견적가 − 원가))${vatNote}${isQuantityEstimated ? " · KOL 수량 추정" : ""}`;
     } else if (sellerQuotePrice > 0) {
       // 셀러 미등록 + 견적가만 있음: 전량 셀러 경유로 추정 (기존 로직)
-      totalVendorMargin = quantity * (sellerQuotePrice - effSupplyPrice) - totalKolRs;
-      vendorNote = `수량 × (견적가 ${formatMoney(sellerQuotePrice, rate)} − 공급가) − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
+      totalVendorMargin = quantity * (sellerQuotePrice - effSupplyCost) - totalKolRs;
+      vendorNote = `수량 × (견적가 ${formatMoney(sellerQuotePrice, rate)} − 원가) − KOL${vatNote}${isQuantityEstimated ? " · 수량 추정" : ""}`;
     } else {
-      totalVendorMargin = totalSales - clientPayout - totalKolRs;
-      vendorNote = `판매액 − 공급가 − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
+      totalVendorMargin = totalSales - quantity * effSupplyCost - totalKolRs;
+      vendorNote = `판매액 − 공급 원가 − KOL${vatNote}${isQuantityEstimated ? " · 수량 추정" : ""}`;
     }
     payoutNote = `총수량 ${formatCurrency(totalQty)} × 공급가 ${formatMoney(effSupplyPrice, rate)}${supplyTiers.length > 0 ? " (구간 적용)" : ""}${isQuantityEstimated ? " · 수량 추정" : ""}`;
   } else {
@@ -196,6 +207,7 @@ export default async function CampaignDetailPage({
           gongguPrice: campaign.gonggu_price ?? 0,
           supplyPrice,
           sellerQuotePrice,
+          supplyVatMode,
           influencerRsRate,
           vendorFeeRate,
           totalRsRate: campaign.total_rs_rate ?? null,
@@ -558,7 +570,7 @@ export default async function CampaignDetailPage({
           sellers={sellers}
           campaignQuotePrice={sellerQuotePrice}
           quoteTiers={quoteTiers}
-          effectiveSupplyPrice={effSupplyPrice}
+          effectiveSupplyCost={effSupplyCost}
           exchangeRate={rate}
         />
       )}

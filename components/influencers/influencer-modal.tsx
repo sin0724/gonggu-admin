@@ -12,6 +12,7 @@ import {
   CONTENT_TYPE_LABEL,
   hasBankDetails,
 } from "@/types/database";
+import type { CrmKol } from "@/lib/supabase/crm";
 import { formatTwd, krwToTwd } from "@/lib/utils";
 
 const CONTENT_TYPE_OPTIONS = Object.entries(CONTENT_TYPE_LABEL) as [
@@ -51,7 +52,23 @@ export default function InfluencerModal({
   const [searchQuery, setSearchQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedInfluencer, setSelectedInfluencer] = useState<Influencer | null>(null);
+  // tianxia-crm KOL DB 검색 결과 — CRM에서 선택하면 저장 시 로컬 influencers에 자동 등록
+  const [crmResults, setCrmResults] = useState<CrmKol[]>([]);
+  const [crmLoading, setCrmLoading] = useState(false);
+  const [crmUnavailable, setCrmUnavailable] = useState(false);
+  const [selectedCrmKol, setSelectedCrmKol] = useState<CrmKol | null>(null);
   const [isNewInfluencer, setIsNewInfluencer] = useState(false);
+  // 정산 계좌 정보 편집 (influencers 마스터에 저장)
+  const [bankEditOpen, setBankEditOpen] = useState(false);
+  const [bankForm, setBankForm] = useState({
+    bank_account_holder: "",
+    bank_name: "",
+    bank_account_number: "",
+    bank_account_type: "",
+    bank_swift_code: "",
+    bank_email: "",
+    bank_address: "",
+  });
   const [isAutoCalc, setIsAutoCalc] = useState(false);
   const [utmCode, setUtmCode] = useState("");
   const [utmSource, setUtmSource] = useState("instagram");
@@ -123,6 +140,32 @@ export default function InfluencerModal({
     fetchInfluencers();
   }, [record]);
 
+  // CRM KOL DB 검색 (디바운스) — 추가 모드에서만
+  useEffect(() => {
+    if (record || isNewInfluencer) return;
+    const q = searchQuery.trim();
+    const timer = setTimeout(async () => {
+      setCrmLoading(true);
+      try {
+        const res = await fetch(`/api/crm-kols?q=${encodeURIComponent(q)}`);
+        if (res.status === 503) {
+          setCrmUnavailable(true);
+          setCrmResults([]);
+          return;
+        }
+        if (!res.ok) throw new Error();
+        const json = await res.json();
+        setCrmUnavailable(false);
+        setCrmResults(json.kols ?? []);
+      } catch {
+        setCrmResults([]);
+      } finally {
+        setCrmLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, record, isNewInfluencer]);
+
   // 드롭다운 외부 클릭 시 닫기
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -140,13 +183,34 @@ export default function InfluencerModal({
 
   const handleSelectInfluencer = (inf: Influencer) => {
     setSelectedInfluencer(inf);
+    setSelectedCrmKol(null);
     setFormData((prev) => ({ ...prev, influencer_id: inf.id }));
+    setSearchQuery("");
+    setShowDropdown(false);
+  };
+
+  const handleSelectCrmKol = (kol: CrmKol) => {
+    // CRM KOL이 이미 로컬에 등록돼 있으면 로컬 레코드를 우선 사용 (계좌 정보 유지)
+    const handle = kol.instagram_handle?.toLowerCase();
+    const existing = influencers.find(
+      (inf) =>
+        (handle && inf.account_url?.toLowerCase().includes(handle)) ||
+        inf.name.toLowerCase() === kol.name.toLowerCase()
+    );
+    if (existing) {
+      handleSelectInfluencer(existing);
+      return;
+    }
+    setSelectedCrmKol(kol);
+    setSelectedInfluencer(null);
+    setFormData((prev) => ({ ...prev, influencer_id: "" }));
     setSearchQuery("");
     setShowDropdown(false);
   };
 
   const handleClearInfluencer = () => {
     setSelectedInfluencer(null);
+    setSelectedCrmKol(null);
     setFormData((prev) => ({ ...prev, influencer_id: "" }));
   };
 
@@ -207,10 +271,42 @@ export default function InfluencerModal({
         influencerId = newInf.id;
       }
 
+      // CRM KOL DB에서 선택한 경우 — 로컬 influencers에 자동 등록 후 연결
+      if (!influencerId && selectedCrmKol) {
+        const handle = selectedCrmKol.instagram_handle;
+        const { data: newInf, error: infError } = await supabase
+          .from("influencers")
+          .insert({
+            name: selectedCrmKol.name,
+            account_url: handle ? `https://instagram.com/${handle}` : null,
+          })
+          .select()
+          .single();
+        if (infError) throw infError;
+        influencerId = newInf.id;
+      }
+
       if (!influencerId) {
         setError("인플루언서를 선택해주세요.");
         setLoading(false);
         return;
+      }
+
+      // 정산 계좌 정보 편집분 저장 (influencers 마스터)
+      if (bankEditOpen) {
+        const { error: bankError } = await supabase
+          .from("influencers")
+          .update({
+            bank_account_holder: bankForm.bank_account_holder.trim() || null,
+            bank_name: bankForm.bank_name.trim() || null,
+            bank_account_number: bankForm.bank_account_number.trim() || null,
+            bank_account_type: bankForm.bank_account_type.trim() || null,
+            bank_swift_code: bankForm.bank_swift_code.trim() || null,
+            bank_email: bankForm.bank_email.trim() || null,
+            bank_address: bankForm.bank_address.trim() || null,
+          })
+          .eq("id", influencerId);
+        if (bankError) throw bankError;
       }
 
       const validContents = contents.filter((c) => c.url.trim() !== "");
@@ -290,28 +386,41 @@ export default function InfluencerModal({
                   onClick={() => { setIsNewInfluencer(false); handleClearInfluencer(); }}
                   className={`btn btn-sm ${!isNewInfluencer ? "btn-primary" : "btn-secondary"}`}
                 >
-                  기존 인플루언서
+                  KOL 검색 (CRM DB)
                 </button>
                 <button
                   type="button"
                   onClick={() => { setIsNewInfluencer(true); handleClearInfluencer(); }}
                   className={`btn btn-sm ${isNewInfluencer ? "btn-primary" : "btn-secondary"}`}
                 >
-                  신규 인플루언서
+                  직접 입력
                 </button>
               </div>
 
               {!isNewInfluencer ? (
                 <div ref={searchRef} className="relative">
-                  <label className="label">인플루언서 선택 *</label>
+                  <label className="label">
+                    KOL 검색 *{" "}
+                    <span className="text-xs font-normal text-gray-400">
+                      — tianxia-crm KOL DB + 이 시스템 등록분
+                    </span>
+                  </label>
 
-                  {/* 선택된 인플루언서 표시 */}
-                  {selectedInfluencer ? (
+                  {/* 선택된 인플루언서/CRM KOL 표시 */}
+                  {selectedInfluencer || selectedCrmKol ? (
                     <div className="flex items-center justify-between px-3 py-2.5 border border-primary-300 bg-primary-50 rounded-lg">
                       <span className="text-sm font-medium text-primary-800">
-                        {selectedInfluencer.name}
-                        {selectedInfluencer.account_url && (
+                        {selectedInfluencer?.name ?? selectedCrmKol?.name}
+                        {selectedInfluencer?.account_url && (
                           <span className="ml-2 text-xs text-primary-500 font-normal">{selectedInfluencer.account_url}</span>
+                        )}
+                        {selectedCrmKol && (
+                          <span className="ml-2 text-xs text-primary-500 font-normal">
+                            {selectedCrmKol.instagram_handle && `@${selectedCrmKol.instagram_handle}`}
+                            {selectedCrmKol.followers != null &&
+                              ` · 팔로워 ${selectedCrmKol.followers.toLocaleString("ko-KR")}`}
+                            {" · CRM에서 가져옴"}
+                          </span>
                         )}
                       </span>
                       <button
@@ -330,31 +439,74 @@ export default function InfluencerModal({
                       value={searchQuery}
                       onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true); }}
                       onFocus={() => setShowDropdown(true)}
-                      placeholder="이름으로 검색..."
+                      placeholder="이름 또는 인스타그램 핸들로 검색..."
                       className="input"
                       autoComplete="off"
                     />
                   )}
 
-                  {/* 드롭다운 */}
-                  {showDropdown && !selectedInfluencer && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                      {filteredInfluencers.length === 0 ? (
-                        <p className="text-sm text-gray-400 p-3 text-center">검색 결과가 없습니다.</p>
+                  {/* 드롭다운 — CRM KOL DB 메인 + 이 시스템 등록분 */}
+                  {showDropdown && !selectedInfluencer && !selectedCrmKol && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                      <p className="px-3 pt-2 pb-1 text-[11px] font-semibold text-gray-400 uppercase">
+                        CRM KOL DB
+                        {crmLoading && " · 검색 중..."}
+                      </p>
+                      {crmUnavailable ? (
+                        <p className="text-xs text-orange-500 px-3 pb-2">
+                          CRM 연동 키가 설정되지 않았습니다 (.env의 CRM_SUPABASE_URL 확인).
+                        </p>
+                      ) : crmResults.length === 0 && !crmLoading ? (
+                        <p className="text-xs text-gray-400 px-3 pb-2">검색 결과 없음</p>
                       ) : (
-                        filteredInfluencers.map((inf) => (
+                        crmResults.map((kol) => (
                           <button
-                            key={inf.id}
+                            key={kol.id}
                             type="button"
-                            onMouseDown={() => handleSelectInfluencer(inf)}
-                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors flex flex-col"
+                            onMouseDown={() => handleSelectCrmKol(kol)}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           >
-                            <span className="font-medium text-gray-900">{inf.name}</span>
-                            {inf.account_url && (
-                              <span className="text-xs text-gray-400 truncate">{inf.account_url}</span>
-                            )}
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-gray-900">{kol.name}</span>
+                              {kol.followers != null && (
+                                <span className="text-xs text-gray-400 shrink-0">
+                                  {kol.followers.toLocaleString("ko-KR")} 팔로워
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {kol.instagram_handle && (
+                                <span className="text-xs text-gray-400">@{kol.instagram_handle}</span>
+                              )}
+                              {(kol.categories ?? []).slice(0, 3).map((c) => (
+                                <span key={c} className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">
+                                  {c}
+                                </span>
+                              ))}
+                            </div>
                           </button>
                         ))
+                      )}
+
+                      {filteredInfluencers.length > 0 && (
+                        <>
+                          <p className="px-3 pt-2 pb-1 text-[11px] font-semibold text-gray-400 uppercase border-t border-gray-100">
+                            이 시스템에 등록됨
+                          </p>
+                          {filteredInfluencers.map((inf) => (
+                            <button
+                              key={inf.id}
+                              type="button"
+                              onMouseDown={() => handleSelectInfluencer(inf)}
+                              className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors flex flex-col"
+                            >
+                              <span className="font-medium text-gray-900">{inf.name}</span>
+                              {inf.account_url && (
+                                <span className="text-xs text-gray-400 truncate">{inf.account_url}</span>
+                              )}
+                            </button>
+                          ))}
+                        </>
                       )}
                     </div>
                   )}
@@ -679,15 +831,78 @@ export default function InfluencerModal({
               </datalist>
             </div>
 
-            {/* 정산 계좌 정보 (인플루언서 마스터에서 관리) */}
+            {/* 정산 계좌 정보 — 이 모달에서 직접 편집 (influencers 마스터에 저장) */}
             {(() => {
               const bankInf = record?.influencer ?? selectedInfluencer;
-              if (!bankInf) return null;
-              return hasBankDetails(bankInf) ? (
+              if (!bankInf && !selectedCrmKol) return null;
+              const openBankEdit = () => {
+                setBankForm({
+                  bank_account_holder: bankInf?.bank_account_holder ?? "",
+                  bank_name: bankInf?.bank_name ?? "",
+                  bank_account_number: bankInf?.bank_account_number ?? "",
+                  bank_account_type: bankInf?.bank_account_type ?? "",
+                  bank_swift_code: bankInf?.bank_swift_code ?? "",
+                  bank_email: bankInf?.bank_email ?? "",
+                  bank_address: bankInf?.bank_address ?? "",
+                });
+                setBankEditOpen(true);
+              };
+              if (bankEditOpen) {
+                const bankField = (
+                  key: keyof typeof bankForm,
+                  label: string,
+                  span2 = false
+                ) => (
+                  <div className={span2 ? "col-span-2" : ""}>
+                    <label className="label text-xs">{label}</label>
+                    <input
+                      type="text"
+                      value={bankForm[key]}
+                      onChange={(e) =>
+                        setBankForm((prev) => ({ ...prev, [key]: e.target.value }))
+                      }
+                      className="input text-sm"
+                    />
+                  </div>
+                );
+                return (
+                  <div className="bg-white rounded-lg border border-primary-200 p-3">
+                    <p className="text-xs font-semibold text-gray-600 mb-2">
+                      정산 계좌 정보 편집 — 저장 시 함께 반영됩니다
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                      {bankField("bank_account_holder", "예금주")}
+                      {bankField("bank_name", "은행명")}
+                      {bankField("bank_account_number", "계좌번호")}
+                      {bankField("bank_account_type", "계좌 유형")}
+                      {bankField("bank_swift_code", "SWIFT/BIC")}
+                      {bankField("bank_email", "이메일")}
+                      {bankField("bank_address", "주소", true)}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setBankEditOpen(false)}
+                      className="text-xs text-gray-400 hover:text-gray-600 mt-2"
+                    >
+                      편집 취소
+                    </button>
+                  </div>
+                );
+              }
+              return bankInf && hasBankDetails(bankInf) ? (
                 <div className="bg-white rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-gray-600 mb-2">
-                    정산 계좌 정보 (Bank Account Details)
-                  </p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-gray-600">
+                      정산 계좌 정보 (Bank Account Details)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={openBankEdit}
+                      className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+                    >
+                      수정
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                     <div>
                       <span className="text-gray-400">예금주</span>{" "}
@@ -726,14 +941,17 @@ export default function InfluencerModal({
                       </div>
                     )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">
-                    계좌 정보 수정은 인플루언서 관리 메뉴에서 가능합니다.
-                  </p>
                 </div>
               ) : (
-                <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2.5 text-xs text-orange-700">
-                  ⚠ 이 인플루언서의 정산 계좌 정보가 미등록 상태입니다.
-                  인플루언서 관리 메뉴에서 등록해주세요.
+                <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2.5 text-xs text-orange-700 flex items-center justify-between gap-2">
+                  <span>⚠ 정산 계좌 정보가 미등록 상태입니다.</span>
+                  <button
+                    type="button"
+                    onClick={openBankEdit}
+                    className="shrink-0 font-medium text-orange-700 underline hover:text-orange-800"
+                  >
+                    지금 입력
+                  </button>
                 </div>
               );
             })()}

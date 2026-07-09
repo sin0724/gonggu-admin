@@ -13,10 +13,12 @@ import {
   minPriceForVendorTarget,
   distributeSales,
   buildTierMarginRows,
+  supplyNetCost,
   FEASIBILITY,
   FEASIBILITY_LABEL,
   Feasibility,
   DealType,
+  SupplyVatMode,
 } from "@/lib/economics";
 
 interface CampaignFormProps {
@@ -168,6 +170,10 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const [vendorFeeAuto, setVendorFeeAuto] = useState(false);
   const [dealType, setDealType] = useState<DealType>(
     campaign?.deal_type === "supply" ? "supply" : "rs"
+  );
+  // 공급가 과세 구분 — 기본 부가세 포함, 브랜드가 구매확인서로 영세 공급 시 0%
+  const [supplyVatMode, setSupplyVatMode] = useState<SupplyVatMode>(
+    campaign?.supply_vat_mode === "zero" ? "zero" : "taxed"
   );
   // 수량 구간별 단가 — 공급가(브랜드) / 셀러 견적가 (예: 200세트↑ 20,500 / 500세트↑ 18,500)
   const [supplyTierFields, setSupplyTierFields] = useState<TierField[]>(
@@ -332,6 +338,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     gongguPrice,
     supplyPrice,
     sellerQuotePrice,
+    supplyVatMode,
     influencerRsRate,
     vendorFeeRate,
     totalRsRate: totalRsRate > 0 ? totalRsRate : null,
@@ -346,6 +353,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
       ? buildTierMarginRows({
           supplyPrice,
           supplyTiers,
+          supplyVatMode,
           quotePrice: sellerQuotePrice,
           quoteTiers,
           gongguPrice,
@@ -367,6 +375,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           gongguPrice,
           supplyPrice,
           sellerQuotePrice,
+          supplyVatMode,
           influencerRsRate,
           vendorFeeRate,
           totalRsRate: totalRsRate > 0 ? totalRsRate : null,
@@ -378,6 +387,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     dealType === "supply" && supplyPrice > 0
       ? recommendGongguPrice({
           supplyPrice,
+          supplyVatMode,
           kolRsRatePct: influencerRsRate,
           targetVendorMargin: targetMargin,
           targetUnit: targetMarginUnit,
@@ -392,6 +402,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     dealType === "supply" && supplyPrice > 0 && gongguPrice > 0
       ? recommendSellerQuote({
           supplyPrice,
+          supplyVatMode,
           gongguPrice,
           kolRsRatePct: influencerRsRate,
           targetVendorMargin: targetMargin,
@@ -400,15 +411,18 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
       : null;
 
   // [공급가형] 수용 가능 최대 공급가 (클라이언트 협상용)
-  // 우리 매출/개 = 견적가 (미입력 시 공구가 직접 판매)
+  // 우리 매출/개 = 견적가 (미입력 시 공구가 직접 판매).
+  // 실질 원가 한도를 먼저 구하고, 부가세 포함 매입이면 ×1.1로 표시가 환산.
   const revenueBase = sellerQuotePrice > 0 ? sellerQuotePrice : gongguPrice;
-  const maxSupplyPrice =
+  const maxSupplyNet =
     revenueBase > 0 && gongguPrice > 0
       ? targetMarginUnit === "won"
         ? revenueBase - gongguPrice * (influencerRsRate / 100) - targetMargin
         : revenueBase -
           gongguPrice * ((influencerRsRate + targetMargin) / 100)
       : 0;
+  const maxSupplyPrice =
+    supplyVatMode === "taxed" ? maxSupplyNet * 1.1 : maxSupplyNet;
 
   // [RS형] 목표 마진(원/건) 달성 최소 공구가 — 마진율은 벤더%로 고정이므로 원 기준만 의미 있음
   const rsMinPrice =
@@ -466,6 +480,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         // 수량 구간별 단가 (KRW로 환산 저장)
         supply_price_tiers: dealType === "supply" ? supplyTiers : [],
         seller_quote_tiers: dealType === "supply" ? quoteTiers : [],
+        // 공급가 과세 구분 (taxed = 부가세 포함, zero = 영세율 구매확인서)
+        supply_vat_mode: dealType === "supply" ? supplyVatMode : "taxed",
         gonggu_price: formData.gonggu_price ? Math.round(gongguPrice) : null,
         exchange_rate: formData.exchange_rate ? parseFloat(formData.exchange_rate) : null,
         target_sales: formData.target_sales ? Math.round(targetSales) : null,
@@ -657,7 +673,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-gray-500">가격 입력 단위</span>
             <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-              모든 가격 부가세(VAT) 포함 기준
+              공구가·정상가·최저가 VAT 포함 · 셀러 견적가 영세율 0%
             </span>
             <div className="flex border border-gray-300 rounded-lg overflow-hidden">
               <button
@@ -724,7 +740,10 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             </div>
             {dealType === "supply" && (
               <div>
-                <label className="label">공급가 ({unitLabel} · VAT 포함)</label>
+                <label className="label">
+                  공급가 ({unitLabel} ·{" "}
+                  {supplyVatMode === "taxed" ? "VAT 포함" : "영세율 0%"})
+                </label>
                 <input
                   type="number"
                   name="supply_price"
@@ -734,16 +753,47 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                   placeholder="예: 18,000"
                   min="0"
                 />
+                {/* 과세 구분 — 브랜드가 구매확인서로 영세 공급하는 경우 0% */}
+                <div className="flex border border-gray-300 rounded-lg overflow-hidden mt-1.5 w-fit">
+                  <button
+                    type="button"
+                    onClick={() => setSupplyVatMode("taxed")}
+                    className={`px-2 py-1 text-[11px] font-medium ${
+                      supplyVatMode === "taxed"
+                        ? "bg-amber-500 text-white"
+                        : "bg-white text-gray-500"
+                    }`}
+                  >
+                    부가세 포함 10%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSupplyVatMode("zero")}
+                    className={`px-2 py-1 text-[11px] font-medium ${
+                      supplyVatMode === "zero"
+                        ? "bg-amber-500 text-white"
+                        : "bg-white text-gray-500"
+                    }`}
+                  >
+                    영세율 0% (구매확인서)
+                  </button>
+                </div>
                 <PriceCaption
                   value={supplyPrice}
                   rate={rate}
-                  suffix="· 브랜드 정산 단가 (우리 원가)"
+                  suffix="· 브랜드 정산 단가"
                 />
+                {supplyPrice > 0 && supplyVatMode === "taxed" && (
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    실질 원가 {fmt(supplyNetCost(supplyPrice, supplyVatMode))}원
+                    (매입세액공제 반영) — 마진 계산 기준
+                  </p>
+                )}
               </div>
             )}
             {dealType === "supply" && (
               <div>
-                <label className="label">셀러 견적가 ({unitLabel} · VAT 포함)</label>
+                <label className="label">셀러 견적가 ({unitLabel} · 영세율 0%)</label>
                 <input
                   type="number"
                   name="seller_quote_price"
@@ -758,25 +808,23 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                     <PriceCaption
                       value={sellerQuotePrice}
                       rate={rate}
-                      suffix="· 대만 총판/셀러 공급 단가 (우리 매출)"
+                      suffix="· 대만 총판/셀러 공급 단가 (우리 매출 · 수출 영세율)"
                     />
-                    {supplyPrice > 0 && (
-                      <p
-                        className={`text-xs mt-0.5 ${
-                          sellerQuotePrice > supplyPrice
-                            ? "text-blue-500"
-                            : "text-red-500"
-                        }`}
-                      >
-                        공급가 대비 마진 {fmt(sellerQuotePrice - supplyPrice)}원 (
-                        {supplyPrice > 0
-                          ? fmtRate(
-                              ((sellerQuotePrice - supplyPrice) / supplyPrice) * 100
-                            )
-                          : "0"}
-                        %)
-                      </p>
-                    )}
+                    {supplyPrice > 0 &&
+                      (() => {
+                        const net = supplyNetCost(supplyPrice, supplyVatMode);
+                        const m = sellerQuotePrice - net;
+                        return (
+                          <p
+                            className={`text-xs mt-0.5 ${
+                              m > 0 ? "text-blue-500" : "text-red-500"
+                            }`}
+                          >
+                            실질 원가 대비 마진 {fmt(m)}원 (
+                            {fmtRate((m / net) * 100)}%)
+                          </p>
+                        );
+                      })()}
                   </>
                 ) : (
                   <p className="text-xs text-gray-400 mt-1">
@@ -811,7 +859,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           {dealType === "supply" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <TierEditor
-                title={`공급가 수량 구간 — 브랜드 → 우리 (${unitLabel} · VAT 포함)`}
+                title={`공급가 수량 구간 — 브랜드 → 우리 (${unitLabel} · ${
+                  supplyVatMode === "taxed" ? "VAT 포함" : "영세율 0%"
+                })`}
                 accent="amber"
                 fields={supplyTierFields}
                 onChange={setSupplyTierFields}
@@ -819,7 +869,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 placeholder={{ qty: "예: 500", price: "예: 14,000" }}
               />
               <TierEditor
-                title={`셀러 견적가 수량 구간 — 우리 → 셀러 (${unitLabel} · VAT 포함)`}
+                title={`셀러 견적가 수량 구간 — 우리 → 셀러 (${unitLabel} · 영세율 0%)`}
                 accent="teal"
                 fields={quoteTierFields}
                 onChange={setQuoteTierFields}
@@ -834,10 +884,12 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             <div className="rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
                 <p className="text-xs font-semibold text-gray-600">
-                  구간별 마진 미리보기 (부가세 포함 · 1개당)
+                  구간별 마진 미리보기 (1개당)
                 </p>
                 <p className="text-xs text-gray-400">
-                  순마진 = 견적가 − 공급가 − KOL RS(공구가 × {influencerRsRate}%)
+                  순마진 = 견적가(영세율) − 공급 실질 원가
+                  {supplyVatMode === "taxed" && "(÷1.1)"} − KOL RS(공구가 ×{" "}
+                  {influencerRsRate}%)
                 </p>
               </div>
               <div className="overflow-x-auto">
@@ -1003,11 +1055,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               <span className="text-red-500 text-base mt-0.5">⚠</span>
               <div>
                 <p className="text-sm font-semibold text-red-700">
-                  셀러 견적가가 공급가 이하입니다 — 역마진
+                  셀러 견적가가 공급 실질 원가 이하입니다 — 역마진
                 </p>
                 <p className="text-xs text-red-600 mt-0.5">
-                  견적가 {fmt(sellerQuotePrice)}원 ≤ 공급가 {fmt(supplyPrice)}원.
-                  견적가는 공급가에 마진을 붙인 금액이어야 합니다.
+                  견적가 {fmt(sellerQuotePrice)}원 ≤ 실질 원가{" "}
+                  {fmt(supplyNetCost(supplyPrice, supplyVatMode))}원
+                  {supplyVatMode === "taxed" && ` (공급가 ${fmt(supplyPrice)}원 ÷ 1.1)`}
+                  . 견적가는 원가에 마진을 붙인 금액이어야 합니다.
                 </p>
               </div>
             </div>
@@ -1100,11 +1154,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             <div className="col-span-2">
               <label className="label">부가세</label>
               <p className="text-sm text-gray-700 mt-2.5">
-                모든 가격은 <b>부가세(VAT) 포함</b> 기준으로 입력·계산됩니다.
+                정상가·최저가·공구가는 <b>부가세 포함</b>, 셀러 견적가(수출)는{" "}
+                <b>영세율 0%</b>입니다.
               </p>
               <p className="text-xs text-gray-400 mt-1">
-                정상가 · 온라인 최저가 · 공급가 · 셀러 견적가 · 공구가 전부 동일
-                기준 — 별도 옵션 없음.
+                공급가는 과세 구분 선택 — 부가세 포함 매입이면 실질 원가(÷1.1)로
+                마진을 계산하고, 브랜드가 구매확인서로 영세 공급하면 공급가
+                그대로가 원가입니다.
               </p>
             </div>
           </div>
@@ -1345,10 +1401,12 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               </p>
             )}
             <p className="text-xs text-blue-400 leading-relaxed">
-              공식: 벤더 마진 = 셀러 견적가 − 공급가 − KOL RS(공구가 × KOL%) ·
-              추천 견적가 = 공급가 + KOL RS + 목표마진
+              공식: 벤더 마진 = 셀러 견적가(영세율 0%) − 공급 실질 원가
+              {supplyVatMode === "taxed" && "(공급가 ÷ 1.1)"} − KOL RS(공구가 ×
+              KOL%) · 추천 견적가 = 실질 원가 + KOL RS + 목표마진
               {targetMarginUnit === "pct" && "(공구가 × %)"} · 최대 공급가 =
-              견적가(미입력 시 공구가) − KOL RS − 목표마진
+              (견적가 − KOL RS − 목표마진)
+              {supplyVatMode === "taxed" && " × 1.1"}
             </p>
           </div>
         )}
@@ -1466,10 +1524,17 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                       <span className="text-gray-600">
                         {dealType === "rs"
                           ? `클라이언트 몫 차감 (공구가 × ${fmtRate(100 - (econ.maxRsRate ?? 0))}%)`
-                          : "공급가 차감 (브랜드 정산 단가)"}
+                          : supplyVatMode === "taxed"
+                          ? `공급 실질 원가 차감 (브랜드 정산 ${fmt(supplyPrice)}원 ÷ 1.1)`
+                          : "공급가 차감 (영세율 0% · 브랜드 정산 단가)"}
                       </span>
                       <span className="font-semibold text-red-500">
-                        -{moneyText(econ.clientTakePerUnit)}
+                        -
+                        {moneyText(
+                          dealType === "rs"
+                            ? econ.clientTakePerUnit
+                            : econ.supplyNetCostPerUnit ?? econ.clientTakePerUnit
+                        )}
                       </span>
                     </div>
                     <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-300 text-sm">

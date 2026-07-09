@@ -10,8 +10,13 @@ import {
   krwToTwd,
 } from "@/lib/utils";
 import InfluencerTable from "@/components/influencers/influencer-table";
-import { distributeSales } from "@/lib/economics";
-import { CampaignInfluencerWithDetails } from "@/types/database";
+import SellerTable from "@/components/sellers/seller-table";
+import { distributeSales, resolveTierPrice } from "@/lib/economics";
+import {
+  CampaignInfluencerWithDetails,
+  CampaignSeller,
+  PriceTier,
+} from "@/types/database";
 
 /** KPI 카드용 금액 — TWD를 메인으로, 원화를 보조로 표기. 환율 없으면 원화만. */
 function MoneyKpi({
@@ -66,6 +71,13 @@ export default async function CampaignDetailPage({
     .eq("campaign_id", id)
     .order("created_at", { ascending: false });
 
+  // 캠페인 셀러 — 총판/개별 셀러/공동구매 업체 통합 채널
+  const { data: rawSellers } = await supabase
+    .from("campaign_sellers")
+    .select("*")
+    .eq("campaign_id", id)
+    .order("created_at", { ascending: false });
+
   // 재무 확정 취급액 — 재무관리 시스템에서 월별로 동기화 (읽기 전용)
   const { data: financeRows } = await supabase
     .from("campaign_finance")
@@ -111,8 +123,29 @@ export default async function CampaignDetailPage({
   const dealType = campaign.deal_type === "supply" ? "supply" : "rs";
   const totalRsEff =
     campaign.total_rs_rate ?? influencerRsRate + vendorFeeRate;
+
+  // ── 셀러 채널 (공급가형): 셀러가 견적 단가로 구매해가는 B2B 공급 ──
+  const sellers = (rawSellers ?? []) as CampaignSeller[];
+  const supplyTiers = (campaign.supply_price_tiers ?? []) as PriceTier[];
+  const quoteTiers = (campaign.seller_quote_tiers ?? []) as PriceTier[];
+  const sellerQty = sellers.reduce((sum, s) => sum + (s.quantity || 0), 0);
+  // 셀러별 견적 단가: 개별 단가 우선, 없으면 캠페인 구간 단가를 그 셀러 수량으로 결정
+  const effQuoteFor = (s: CampaignSeller) =>
+    s.quote_price ?? resolveTierPrice(sellerQuotePrice, quoteTiers, s.quantity || 0);
+  const sellerRevenue = sellers.reduce(
+    (sum, s) => sum + (s.quantity || 0) * effQuoteFor(s),
+    0
+  );
+  // 브랜드 공급가 구간은 우리 총 발주량(KOL 직접 + 셀러) 기준으로 결정
+  const totalQty = quantity + sellerQty;
+  const effSupplyPrice = resolveTierPrice(supplyPrice, supplyTiers, totalQty);
+  const sellerMargin =
+    supplyPrice > 0 ? sellerRevenue - sellerQty * effSupplyPrice : 0;
+  const hasSellerChannel = dealType === "supply" && sellers.length > 0;
+
   const isRsDeal = dealType === "rs" && totalRsEff > 0;
-  const isSupplyDeal = dealType === "supply" && supplyPrice > 0 && quantity > 0;
+  const isSupplyDeal =
+    dealType === "supply" && supplyPrice > 0 && (quantity > 0 || sellerQty > 0);
 
   let clientPayout: number;
   let totalVendorMargin: number;
@@ -124,22 +157,31 @@ export default async function CampaignDetailPage({
     payoutNote = `판매액 × ${100 - totalRsEff}% (RS형)`;
     vendorNote = `판매액 × 총 RS ${totalRsEff}% − KOL 지급액`;
   } else if (isSupplyDeal) {
-    clientPayout = quantity * supplyPrice;
-    if (sellerQuotePrice > 0) {
-      // 셀러 경유: 우리 매출 = 수량 × 견적가. 브랜드 정산·KOL 지급 후가 마진.
-      totalVendorMargin = quantity * (sellerQuotePrice - supplyPrice) - totalKolRs;
+    clientPayout = totalQty * effSupplyPrice;
+    if (hasSellerChannel) {
+      // 셀러 등록됨: KOL 직접 판매 채널 + 셀러 공급 채널을 합산
+      const kolChannelMargin =
+        totalSales - quantity * effSupplyPrice - totalKolRs;
+      totalVendorMargin = kolChannelMargin + sellerMargin;
+      vendorNote = `KOL 직접(판매액 − 수량×공급가 − RS) + 셀러(수량×(견적가 − 공급가))${isQuantityEstimated ? " · KOL 수량 추정" : ""}`;
+    } else if (sellerQuotePrice > 0) {
+      // 셀러 미등록 + 견적가만 있음: 전량 셀러 경유로 추정 (기존 로직)
+      totalVendorMargin = quantity * (sellerQuotePrice - effSupplyPrice) - totalKolRs;
       vendorNote = `수량 × (견적가 ${formatMoney(sellerQuotePrice, rate)} − 공급가) − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
     } else {
       totalVendorMargin = totalSales - clientPayout - totalKolRs;
       vendorNote = `판매액 − 공급가 − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
     }
-    payoutNote = `수량 × 공급가 ${formatMoney(supplyPrice, rate)}${isQuantityEstimated ? " · 수량 추정" : ""}`;
+    payoutNote = `총수량 ${formatCurrency(totalQty)} × 공급가 ${formatMoney(effSupplyPrice, rate)}${supplyTiers.length > 0 ? " (구간 적용)" : ""}${isQuantityEstimated ? " · 수량 추정" : ""}`;
   } else {
     totalVendorMargin = totalSales * (vendorFeeRate / 100);
     clientPayout = totalSales - totalVendorMargin - totalKolRs;
     payoutNote = "판매액 − 총 RS (조건 미입력 시 추정)";
     vendorNote = `판매액 × ${vendorFeeRate}% (추정)`;
   }
+
+  // 전체 취급액 = KOL 판매액(소비자 판매) + 셀러 공급액(B2B)
+  const combinedSales = totalSales + sellerRevenue;
 
   const notUploadedCount = records.filter((r) => r.is_product_sent && !r.is_uploaded).length;
   const notSettledCount = records.filter((r) => r.is_uploaded && !r.is_settled).length;
@@ -159,8 +201,9 @@ export default async function CampaignDetailPage({
           totalRsRate: campaign.total_rs_rate ?? null,
         })
       : null;
+  // 달성률은 KOL 판매 + 셀러 공급을 합친 취급액 기준
   const achievementRate =
-    targetSales > 0 ? Math.min(100, (totalSales / targetSales) * 100) : 0;
+    targetSales > 0 ? Math.min(100, (combinedSales / targetSales) * 100) : 0;
 
   return (
     <div className="space-y-5">
@@ -333,11 +376,12 @@ export default async function CampaignDetailPage({
               <span className="text-gray-500">
                 목표 달성률 ·{" "}
                 <span className="font-semibold text-gray-700">
-                  {(targetSales > 0 ? (totalSales / targetSales) * 100 : 0).toFixed(1)}%
+                  {(targetSales > 0 ? (combinedSales / targetSales) * 100 : 0).toFixed(1)}%
                 </span>
               </span>
               <span className="text-gray-400">
-                {formatMoney(totalSales, rate)} / {formatMoney(targetSales, rate)}
+                {formatMoney(combinedSales, rate)} / {formatMoney(targetSales, rate)}
+                {hasSellerChannel && " · KOL+셀러 합산"}
               </span>
             </div>
             <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
@@ -386,29 +430,70 @@ export default async function CampaignDetailPage({
       )}
 
       {/* ② KPI 한 줄 */}
-      {records.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+      {(records.length > 0 || sellers.length > 0) && (
+        <div
+          className={`grid grid-cols-2 md:grid-cols-4 gap-3 ${
+            hasSellerChannel ? "lg:grid-cols-8" : "lg:grid-cols-7"
+          }`}
+        >
           {/* 참여 인원 */}
           <div className="card p-4">
-            <p className="text-xs text-gray-400 mb-1">참여 인원</p>
-            <p className="text-2xl font-bold text-gray-900">{records.length}<span className="text-sm font-normal text-gray-400 ml-0.5">명</span></p>
+            <p className="text-xs text-gray-400 mb-1">참여 KOL · 셀러</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {records.length}
+              <span className="text-sm font-normal text-gray-400 ml-0.5">명</span>
+              {sellers.length > 0 && (
+                <span className="text-sm font-normal text-gray-500 ml-1.5">
+                  +{sellers.length}
+                  <span className="text-xs text-gray-400">셀러</span>
+                </span>
+              )}
+            </p>
           </div>
 
-          {/* 총 판매액 */}
+          {/* 총 취급액 = KOL 판매 + 셀러 공급 */}
           <div className="card p-4 col-span-1 md:col-span-1">
-            <p className="text-xs text-gray-400 mb-1">총 판매액</p>
+            <p className="text-xs text-gray-400 mb-1">
+              {hasSellerChannel ? "총 취급액 (KOL+셀러)" : "총 판매액"}
+            </p>
             <MoneyKpi
-              krw={totalSales}
+              krw={combinedSales}
               rate={rate}
               className="text-xl font-bold text-gray-900"
               unitClassName="text-xs font-normal text-gray-400 ml-0.5"
             />
-            {quantity > 0 && (
+            {hasSellerChannel ? (
               <p className="text-xs text-gray-400 mt-0.5">
-                {formatCurrency(quantity)}개{isQuantityEstimated && " (추정)"}
+                KOL {formatMoney(totalSales, rate)} · 셀러{" "}
+                {formatMoney(sellerRevenue, rate)}
               </p>
+            ) : (
+              quantity > 0 && (
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {formatCurrency(quantity)}개{isQuantityEstimated && " (추정)"}
+                </p>
+              )
             )}
           </div>
+
+          {/* 셀러 공급액 (B2B 채널) */}
+          {hasSellerChannel && (
+            <div className="card p-4 border-teal-200 bg-teal-50">
+              <p className="text-xs text-teal-600 font-medium mb-1">
+                셀러 공급액 (우리 매출)
+              </p>
+              <MoneyKpi
+                krw={sellerRevenue}
+                rate={rate}
+                className="text-xl font-bold text-teal-700"
+                unitClassName="text-xs font-normal text-teal-400 ml-0.5"
+              />
+              <p className="text-xs text-teal-500 mt-0.5">
+                {formatCurrency(sellerQty)}세트 · 마진{" "}
+                {formatMoney(sellerMargin, rate)}
+              </p>
+            </div>
+          )}
 
           {/* 벤더사 마진 - 가장 중요 */}
           <div className="card p-4 border-blue-200 bg-blue-50 col-span-1">
@@ -466,7 +551,19 @@ export default async function CampaignDetailPage({
         </div>
       )}
 
-      {/* ③ 인플루언서 테이블 */}
+      {/* ③ 셀러 테이블 — 총판/개별 셀러/공동구매 업체 (공급가형 채널) */}
+      {(dealType === "supply" || sellers.length > 0) && (
+        <SellerTable
+          campaignId={id}
+          sellers={sellers}
+          campaignQuotePrice={sellerQuotePrice}
+          quoteTiers={quoteTiers}
+          effectiveSupplyPrice={effSupplyPrice}
+          exchangeRate={rate}
+        />
+      )}
+
+      {/* ④ 인플루언서 테이블 */}
       <div>
         <InfluencerTable
           campaignId={id}

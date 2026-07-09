@@ -29,7 +29,6 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
   const normalPrice = campaign.normal_price ?? 0;
   const onlineMinPrice = campaign.online_min_price ?? 0;
   const supplyPrice = campaign.supply_price ?? 0;
-  const vatIncluded = campaign.vat_included !== false;
   // 제안서에는 분배 내역 없이 총 RS만 노출
   const totalRsRate =
     campaign.total_rs_rate ??
@@ -45,7 +44,6 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
     influencerRsRate: campaign.influencer_rs_rate ?? 0,
     vendorFeeRate: campaign.vendor_fee_rate ?? 0,
     totalRsRate,
-    vatIncluded,
     normalPrice,
     onlineMinPrice,
   });
@@ -136,19 +134,8 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
               <p className="text-lg font-bold text-primary-700">
                 {money(gongguPrice)}
               </p>
-              {!vatIncluded && (
-                <p className="text-xs text-primary-400 mt-0.5">VAT 별도</p>
-              )}
+              <p className="text-xs text-primary-400 mt-0.5">부가세 포함</p>
             </div>
-            {!vatIncluded && (
-              <div className="rounded-xl border border-gray-200 p-4">
-                <p className="text-xs text-gray-400 mb-1">소비자 실결제가</p>
-                <p className="text-lg font-bold text-gray-900">
-                  {money(econ.consumerPrice)}
-                </p>
-                <p className="text-xs text-gray-400 mt-0.5">VAT 포함</p>
-              </div>
-            )}
           </div>
 
           {/* 할인 메리트 */}
@@ -198,7 +185,7 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
             <div className="flex justify-between px-4 py-3">
               <span className="text-gray-500">부가세</span>
               <span className="font-semibold text-gray-900">
-                {vatIncluded ? "공구가에 포함" : "별도 (소비자 결제 시 +10%)"}
+                포함 — 모든 표기 금액은 부가세 포함 기준
               </span>
             </div>
             {campaign.start_date && (

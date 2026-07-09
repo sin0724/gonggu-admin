@@ -29,6 +29,11 @@ export interface Database {
         Insert: never; // 재무관리 시스템(service role)만 기록
         Update: never;
       };
+      campaign_sellers: {
+        Row: CampaignSeller;
+        Insert: CampaignSellerInsert;
+        Update: CampaignSellerUpdate;
+      };
     };
   };
 }
@@ -45,6 +50,12 @@ export interface CampaignFinance {
 
 export type DealType = "rs" | "supply";
 
+/** 수량 구간 단가 — min_qty 세트 이상 주문 시 개당 price (부가세 포함, 원) */
+export interface PriceTier {
+  min_qty: number;
+  price: number;
+}
+
 export interface Campaign {
   id: string;
   client_name: string;
@@ -53,8 +64,12 @@ export interface Campaign {
   normal_price: number | null;
   online_min_price: number | null;
   supply_price: number | null;
+  /** [공급가형] 브랜드 공급가 수량 구간. 빈 배열이면 supply_price 단일가 */
+  supply_price_tiers: PriceTier[] | null;
   /** [공급가형] 대만 총판/셀러에게 견적(공급)한 개당 단가(원). NULL이면 공구가 직접 판매로 간주. 벤더 마진 = 견적가 − 공급가 − KOL RS */
   seller_quote_price: number | null;
+  /** [공급가형] 셀러 견적가 수량 구간. 빈 배열이면 seller_quote_price 단일가 */
+  seller_quote_tiers: PriceTier[] | null;
   gonggu_price: number | null;
   vendor_fee_rate: number | null;
   influencer_rs_rate: number | null;
@@ -76,6 +91,29 @@ export interface Campaign {
 
 export type CampaignInsert = Omit<Campaign, "id" | "created_at">;
 export type CampaignUpdate = Partial<CampaignInsert>;
+
+/**
+ * 캠페인별 셀러 — 대만 총판/개별 셀러/공동구매 업체를 "셀러"로 통일.
+ * 셀러가 우리에게 견적 단가(부가세 포함)로 구매해가서 판매하는 채널.
+ * 우리 매출 = 수량 × 견적 단가, 마진 = 수량 × (견적 단가 − 공급가).
+ */
+export interface CampaignSeller {
+  id: string;
+  campaign_id: string;
+  name: string;
+  contact: string | null;
+  /** 구매(공급) 수량 (세트) */
+  quantity: number;
+  /** 개당 견적 단가 (부가세 포함, 원). NULL이면 캠페인 구간 단가를 수량에 맞춰 자동 적용 */
+  quote_price: number | null;
+  is_paid: boolean;
+  paid_date: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export type CampaignSellerInsert = Omit<CampaignSeller, "id" | "created_at">;
+export type CampaignSellerUpdate = Partial<CampaignSellerInsert>;
 
 export interface Influencer {
   id: string;

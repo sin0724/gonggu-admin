@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Campaign, CampaignInsert } from "@/types/database";
+import { Campaign, CampaignInsert, PriceTier } from "@/types/database";
 import { krwToTwd, formatTwd } from "@/lib/utils";
 import {
   computeUnitEconomics,
@@ -12,6 +12,7 @@ import {
   recommendSellerQuote,
   minPriceForVendorTarget,
   distributeSales,
+  buildTierMarginRows,
   FEASIBILITY,
   FEASIBILITY_LABEL,
   Feasibility,
@@ -37,6 +38,106 @@ function CheckItem({ ok, label }: { ok: boolean; label: string }) {
 const fmt = (n: number) =>
   n.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 const fmtRate = (n: number) => n.toFixed(1);
+
+/** 구간 입력 필드 (문자열 상태 — 저장 시 숫자·KRW로 변환) */
+interface TierField {
+  min_qty: string;
+  price: string;
+}
+
+const tiersToFields = (tiers: PriceTier[] | null | undefined): TierField[] =>
+  (tiers ?? []).map((t) => ({
+    min_qty: t.min_qty.toString(),
+    price: t.price.toString(),
+  }));
+
+/** 수량 구간별 단가 편집기 — "N세트 이상 → 개당 단가" 행을 추가/삭제 */
+function TierEditor({
+  title,
+  accent,
+  fields,
+  onChange,
+  unitLabel,
+  placeholder,
+}: {
+  title: string;
+  accent: "amber" | "teal";
+  fields: TierField[];
+  onChange: (next: TierField[]) => void;
+  unitLabel: string;
+  placeholder: { qty: string; price: string };
+}) {
+  const c =
+    accent === "amber"
+      ? {
+          box: "bg-amber-50 border-amber-200",
+          title: "text-amber-700",
+          btn: "text-amber-700 border-amber-300 hover:bg-amber-100",
+        }
+      : {
+          box: "bg-teal-50 border-teal-200",
+          title: "text-teal-700",
+          btn: "text-teal-700 border-teal-300 hover:bg-teal-100",
+        };
+  const update = (i: number, key: keyof TierField, value: string) => {
+    const next = fields.map((f, idx) => (idx === i ? { ...f, [key]: value } : f));
+    onChange(next);
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${c.box}`}>
+      <div className="flex items-center justify-between mb-2">
+        <p className={`text-xs font-semibold ${c.title}`}>{title}</p>
+        <button
+          type="button"
+          onClick={() => onChange([...fields, { min_qty: "", price: "" }])}
+          className={`text-xs font-medium border rounded-lg px-2 py-1 bg-white ${c.btn}`}
+        >
+          + 구간 추가
+        </button>
+      </div>
+      {fields.length === 0 ? (
+        <p className="text-xs text-gray-400">
+          구간이 없으면 기본 단가 하나로 계산합니다.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {fields.map((f, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-sm">
+              <input
+                type="number"
+                value={f.min_qty}
+                onChange={(e) => update(i, "min_qty", e.target.value)}
+                className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary-400"
+                placeholder={placeholder.qty}
+                min="1"
+              />
+              <span className="text-xs text-gray-500 whitespace-nowrap">
+                세트 이상 →
+              </span>
+              <input
+                type="number"
+                value={f.price}
+                onChange={(e) => update(i, "price", e.target.value)}
+                className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary-400"
+                placeholder={placeholder.price}
+                min="0"
+              />
+              <span className="text-xs text-gray-500">{unitLabel}</span>
+              <button
+                type="button"
+                onClick={() => onChange(fields.filter((_, idx) => idx !== i))}
+                className="ml-auto text-xs text-red-500 hover:text-red-600 px-1.5 py-1"
+                aria-label="구간 삭제"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** 가격 입력 아래 천단위 콤마 + TWD 환산 확인용 캡션 (TWD 메인 · 원화 보조) */
 function PriceCaption({
@@ -68,6 +169,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const [dealType, setDealType] = useState<DealType>(
     campaign?.deal_type === "supply" ? "supply" : "rs"
   );
+  // 수량 구간별 단가 — 공급가(브랜드) / 셀러 견적가 (예: 200세트↑ 20,500 / 500세트↑ 18,500)
+  const [supplyTierFields, setSupplyTierFields] = useState<TierField[]>(
+    tiersToFields(campaign?.supply_price_tiers)
+  );
+  const [quoteTierFields, setQuoteTierFields] = useState<TierField[]>(
+    tiersToFields(campaign?.seller_quote_tiers)
+  );
   // 가격 입력 통화. 광고주가 TWD로 단가를 주는 경우 NT$로 바로 입력 (저장은 항상 KRW).
   const [priceCurrency, setPriceCurrency] = useState<"krw" | "twd">("krw");
   // 목표 판매액 입력 통화 — 가격 통화와 독립. 기본 원화.
@@ -88,7 +196,6 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     vendor_fee_rate: campaign?.vendor_fee_rate?.toString() ?? "",
     shipping_payer: campaign?.shipping_payer ?? "buyer",
     shipping_fee: campaign?.shipping_fee?.toString() ?? "",
-    vat_included: campaign?.vat_included === false ? "false" : "true",
     start_date: campaign?.start_date ?? "",
     end_date: campaign?.end_date ?? "",
     purchase_form_url: campaign?.purchase_form_url ?? "",
@@ -143,23 +250,26 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     if (cur === priceCurrency) return;
     if (cur === "twd" && rate === null) return; // 환율이 있어야 TWD 입력 가능
     if (rate !== null) {
-      setFormData((prev) => {
-        const conv = (s: string) => {
-          const v = parseFloat(s);
-          if (!s || isNaN(v)) return s;
-          return cur === "twd"
-            ? (Math.round((v / rate) * 10) / 10).toString()
-            : Math.round(v * rate).toString();
-        };
-        return {
-          ...prev,
-          normal_price: conv(prev.normal_price),
-          online_min_price: conv(prev.online_min_price),
-          supply_price: conv(prev.supply_price),
-          seller_quote_price: conv(prev.seller_quote_price),
-          gonggu_price: conv(prev.gonggu_price),
-        };
-      });
+      const conv = (s: string) => {
+        const v = parseFloat(s);
+        if (!s || isNaN(v)) return s;
+        return cur === "twd"
+          ? (Math.round((v / rate) * 10) / 10).toString()
+          : Math.round(v * rate).toString();
+      };
+      setFormData((prev) => ({
+        ...prev,
+        normal_price: conv(prev.normal_price),
+        online_min_price: conv(prev.online_min_price),
+        supply_price: conv(prev.supply_price),
+        seller_quote_price: conv(prev.seller_quote_price),
+        gonggu_price: conv(prev.gonggu_price),
+      }));
+      // 구간 단가도 함께 환산
+      const convTiers = (fields: TierField[]) =>
+        fields.map((f) => ({ ...f, price: conv(f.price) }));
+      setSupplyTierFields(convTiers);
+      setQuoteTierFields(convTiers);
     }
     setPriceCurrency(cur);
   };
@@ -203,8 +313,19 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const totalRsRate = parseFloat(formData.total_rs_rate) || 0;
   const influencerRsRate = parseFloat(formData.influencer_rs_rate) || 0;
   const vendorFeeRate = parseFloat(formData.vendor_fee_rate) || 0;
-  const vatIncluded = formData.vat_included === "true";
   const isSellerShipping = formData.shipping_payer === "seller";
+
+  // 구간 단가 (입력 통화 → KRW, 유효한 행만)
+  const fieldsToTiers = (fields: TierField[]): PriceTier[] =>
+    fields
+      .map((f) => ({
+        min_qty: parseInt(f.min_qty, 10) || 0,
+        price: Math.round(toKrw(parseFloat(f.price) || 0)),
+      }))
+      .filter((t) => t.min_qty > 0 && t.price > 0)
+      .sort((a, b) => a.min_qty - b.min_qty);
+  const supplyTiers = fieldsToTiers(supplyTierFields);
+  const quoteTiers = fieldsToTiers(quoteTierFields);
 
   const econInput = {
     dealType,
@@ -214,11 +335,23 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     influencerRsRate,
     vendorFeeRate,
     totalRsRate: totalRsRate > 0 ? totalRsRate : null,
-    vatIncluded,
     normalPrice,
     onlineMinPrice,
   };
   const econ = computeUnitEconomics(econInput);
+
+  // [공급가형] 구간별 마진 미리보기 (구간이 하나라도 있을 때)
+  const tierRows =
+    dealType === "supply" && (supplyTiers.length > 0 || quoteTiers.length > 0)
+      ? buildTierMarginRows({
+          supplyPrice,
+          supplyTiers,
+          quotePrice: sellerQuotePrice,
+          quoteTiers,
+          gongguPrice,
+          kolRsRatePct: influencerRsRate,
+        })
+      : [];
 
   // 목표 KPI — 목표 판매액(자체 통화 → KRW)을 돈 흐름 모델대로 분배
   const targetUnitLabel = targetCurrency === "twd" ? "NT$" : "원";
@@ -251,13 +384,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         })
       : null;
   const recommendedPrice = rec?.rounded ?? 0;
-  const recommendedConsumerPrice = vatIncluded
-    ? recommendedPrice
-    : Math.round(recommendedPrice * 1.1);
   const recommendedExceedsOnlineMin =
-    rec !== null &&
-    onlineMinPrice > 0 &&
-    recommendedConsumerPrice >= onlineMinPrice;
+    rec !== null && onlineMinPrice > 0 && recommendedPrice >= onlineMinPrice;
 
   // [공급가형] 추천 셀러 견적가 (벤더 목표 마진 기준)
   const recQuote =
@@ -335,6 +463,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           dealType === "supply" && formData.seller_quote_price
             ? Math.round(sellerQuotePrice)
             : null,
+        // 수량 구간별 단가 (KRW로 환산 저장)
+        supply_price_tiers: dealType === "supply" ? supplyTiers : [],
+        seller_quote_tiers: dealType === "supply" ? quoteTiers : [],
         gonggu_price: formData.gonggu_price ? Math.round(gongguPrice) : null,
         exchange_rate: formData.exchange_rate ? parseFloat(formData.exchange_rate) : null,
         target_sales: formData.target_sales ? Math.round(targetSales) : null,
@@ -343,7 +474,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         influencer_rs_rate: formData.influencer_rs_rate ? parseFloat(formData.influencer_rs_rate) : null,
         shipping_fee: formData.shipping_fee ? parseFloat(formData.shipping_fee) : null,
         shipping_payer: formData.shipping_payer || null,
-        vat_included: formData.vat_included === "true",
+        // 모든 가격은 부가세 포함으로 통일 — VAT 별도 옵션 폐기
+        vat_included: true,
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
         purchase_form_url: formData.purchase_form_url || null,
@@ -524,6 +656,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           {/* 가격 입력 통화 토글 — 광고주가 TWD로 단가를 주면 NT$로 바로 입력 */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-gray-500">가격 입력 단위</span>
+            <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+              모든 가격 부가세(VAT) 포함 기준
+            </span>
             <div className="flex border border-gray-300 rounded-lg overflow-hidden">
               <button
                 type="button"
@@ -562,7 +697,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           {/* 가격 */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
-              <label className="label">정상가 ({unitLabel})</label>
+              <label className="label">정상가 ({unitLabel} · VAT 포함)</label>
               <input
                 type="number"
                 name="normal_price"
@@ -575,7 +710,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               <PriceCaption value={normalPrice} rate={rate} suffix="· 소비자 정상 판매가" />
             </div>
             <div>
-              <label className="label">온라인 최저가 ({unitLabel})</label>
+              <label className="label">온라인 최저가 ({unitLabel} · VAT 포함)</label>
               <input
                 type="number"
                 name="online_min_price"
@@ -589,7 +724,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             </div>
             {dealType === "supply" && (
               <div>
-                <label className="label">공급가 ({unitLabel})</label>
+                <label className="label">공급가 ({unitLabel} · VAT 포함)</label>
                 <input
                   type="number"
                   name="supply_price"
@@ -608,7 +743,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             )}
             {dealType === "supply" && (
               <div>
-                <label className="label">셀러 견적가 ({unitLabel})</label>
+                <label className="label">셀러 견적가 ({unitLabel} · VAT 포함)</label>
                 <input
                   type="number"
                   name="seller_quote_price"
@@ -651,7 +786,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               </div>
             )}
             <div>
-              <label className="label">공구가 ({unitLabel})</label>
+              <label className="label">공구가 ({unitLabel} · VAT 포함)</label>
               <input
                 type="number"
                 name="gonggu_price"
@@ -671,6 +806,94 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               )}
             </div>
           </div>
+
+          {/* [공급가형] 수량 구간별 단가 — 브랜드/셀러 모두 세트 수량에 따라 단가가 다른 경우 */}
+          {dealType === "supply" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <TierEditor
+                title={`공급가 수량 구간 — 브랜드 → 우리 (${unitLabel} · VAT 포함)`}
+                accent="amber"
+                fields={supplyTierFields}
+                onChange={setSupplyTierFields}
+                unitLabel={unitLabel}
+                placeholder={{ qty: "예: 500", price: "예: 14,000" }}
+              />
+              <TierEditor
+                title={`셀러 견적가 수량 구간 — 우리 → 셀러 (${unitLabel} · VAT 포함)`}
+                accent="teal"
+                fields={quoteTierFields}
+                onChange={setQuoteTierFields}
+                unitLabel={unitLabel}
+                placeholder={{ qty: "예: 200", price: "예: 20,500" }}
+              />
+            </div>
+          )}
+
+          {/* [공급가형] 구간별 마진 미리보기 */}
+          {tierRows.length > 0 && supplyPrice > 0 && (
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                <p className="text-xs font-semibold text-gray-600">
+                  구간별 마진 미리보기 (부가세 포함 · 1개당)
+                </p>
+                <p className="text-xs text-gray-400">
+                  순마진 = 견적가 − 공급가 − KOL RS(공구가 × {influencerRsRate}%)
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium">수량 구간</th>
+                      <th className="px-4 py-2 text-right font-medium">공급가</th>
+                      <th className="px-4 py-2 text-right font-medium">셀러 견적가</th>
+                      <th className="px-4 py-2 text-right font-medium">개당 마진</th>
+                      <th className="px-4 py-2 text-right font-medium">개당 순마진 (−KOL)</th>
+                      <th className="px-4 py-2 text-right font-medium">구간 수량 기준 총 순마진</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {tierRows.map((row) => (
+                      <tr key={row.minQty} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 font-medium text-gray-700">
+                          {row.minQty === 0
+                            ? "기본 (구간 미달)"
+                            : `${fmt(row.minQty)}세트 이상`}
+                        </td>
+                        <td className="px-4 py-2 text-right text-amber-700">
+                          {moneyText(row.supplyPrice)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-teal-700">
+                          {moneyText(row.quotePrice)}
+                        </td>
+                        <td
+                          className={`px-4 py-2 text-right font-semibold ${
+                            row.marginPerUnit > 0 ? "text-gray-900" : "text-red-600"
+                          }`}
+                        >
+                          {moneyText(row.marginPerUnit)}
+                        </td>
+                        <td
+                          className={`px-4 py-2 text-right font-semibold ${
+                            row.netMarginPerUnit >= 0 ? "text-blue-700" : "text-red-600"
+                          }`}
+                        >
+                          {moneyText(row.netMarginPerUnit)}
+                        </td>
+                        <td
+                          className={`px-4 py-2 text-right ${
+                            row.totalNetMargin >= 0 ? "text-gray-700" : "text-red-600"
+                          }`}
+                        >
+                          {row.minQty === 0 ? "—" : moneyText(row.totalNetMargin)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* RS형: 클라이언트 몫 자동 표시 */}
           {dealType === "rs" &&
@@ -876,36 +1099,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             </div>
             <div className="col-span-2">
               <label className="label">부가세</label>
-              <div className="flex gap-5 mt-2.5">
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="vat_included"
-                    value="true"
-                    checked={formData.vat_included === "true"}
-                    onChange={handleChange}
-                    className="accent-primary-600"
-                  />
-                  포함 (VAT incl.)
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="vat_included"
-                    value="false"
-                    checked={formData.vat_included === "false"}
-                    onChange={handleChange}
-                    className="accent-primary-600"
-                  />
-                  별도 (VAT excl.)
-                </label>
-              </div>
-              {!vatIncluded && gongguPrice > 0 && (
-                <p className="text-xs text-orange-600 mt-1.5">
-                  소비자 실결제가 = {fmt(econ.consumerPrice)}원 (공구가 × 1.1) —
-                  할인율·가격 메리트는 실결제가 기준으로 계산됩니다.
-                </p>
-              )}
+              <p className="text-sm text-gray-700 mt-2.5">
+                모든 가격은 <b>부가세(VAT) 포함</b> 기준으로 입력·계산됩니다.
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                정상가 · 온라인 최저가 · 공급가 · 셀러 견적가 · 공구가 전부 동일
+                기준 — 별도 옵션 없음.
+              </p>
             </div>
           </div>
         </div>
@@ -1139,9 +1339,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
 
             {recommendedExceedsOnlineMin && (
               <p className="text-xs text-orange-600 font-medium">
-                ⚠ 추천가 기준 소비자 실결제가({fmt(recommendedConsumerPrice)}원)가
-                온라인 최저가({fmt(onlineMinPrice)}원) 이상입니다 — 이 조건으로는
-                가격 메리트가 없습니다. 공급가를 더 낮춰 받아야 합니다.
+                ⚠ 추천 공구가({fmt(recommendedPrice)}원)가 온라인 최저가(
+                {fmt(onlineMinPrice)}원) 이상입니다 — 이 조건으로는 가격
+                메리트가 없습니다. 공급가를 더 낮춰 받아야 합니다.
               </p>
             )}
             <p className="text-xs text-blue-400 leading-relaxed">
@@ -1165,7 +1365,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                     가격 메리트 부족
                   </p>
                   <p className="text-xs text-orange-600 mt-0.5">
-                    소비자 실결제가({moneyText(econ.consumerPrice)})가 온라인 최저가(
+                    공구가({moneyText(gongguPrice)})가 온라인 최저가(
                     {moneyText(onlineMinPrice)}) 이상입니다. 공동구매의 전제가
                     무너집니다.
                   </p>
@@ -1182,7 +1382,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               {(normalPrice > 0 || onlineMinPrice > 0) && (
                 <div>
                   <p className="text-xs font-medium text-gray-600 mb-2">
-                    가격 비교 {!vatIncluded && "(소비자 실결제가 기준)"}
+                    가격 비교 (부가세 포함 기준)
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     {normalPrice > 0 && (
@@ -1192,7 +1392,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           {fmtRate(econ.normalDiscountRate)}%
                         </p>
                         <p className="text-xs text-gray-400 mt-1">
-                          {moneyText(normalPrice)} → {moneyText(econ.consumerPrice)}
+                          {moneyText(normalPrice)} → {moneyText(gongguPrice)}
                         </p>
                       </div>
                     )}
@@ -1217,7 +1417,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                           {fmtRate(econ.onlineMinDiscountRate)}%
                         </p>
                         <p className="text-xs text-gray-400 mt-1">
-                          {moneyText(onlineMinPrice)} → {moneyText(econ.consumerPrice)}
+                          {moneyText(onlineMinPrice)} → {moneyText(gongguPrice)}
                         </p>
                       </div>
                     )}

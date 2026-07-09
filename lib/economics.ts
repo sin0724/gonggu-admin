@@ -21,11 +21,97 @@
 //  - 클라이언트의 원가·마진은 우리가 알 수 없고 판단 대상이 아니다.
 //  - 공구가는 온라인 최저가보다 싸야 메리트가 있다.
 //  - 배송비는 판매자 부담이어도 클라이언트 몫에서 나가므로 마진 계산에 미반영.
-//  - VAT 별도면 소비자 실결제가 = 공구가 × 1.1이며 할인율 비교는 실결제가 기준.
-
-export const VAT_RATE = 0.1;
+//  - 모든 가격(정상가·최저가·공급가·견적가·공구가)은 부가세 포함 기준으로 통일.
 
 export type DealType = "rs" | "supply";
+
+// ── 수량 구간별 단가 ────────────────────────────────────────
+// 브랜드 공급가·셀러 견적가 모두 "N세트 이상이면 개당 얼마" 식으로
+// 수량 구간에 따라 단가가 달라질 수 있다. (예: 200세트↑ 20,500 / 500세트↑ 18,500)
+
+/** 수량 구간 단가 — min_qty 세트 이상 주문 시 개당 price (부가세 포함) */
+export interface PriceTier {
+  min_qty: number;
+  price: number;
+}
+
+/** 수량에 해당하는 구간 단가. 맞는 구간이 없으면 기본가. */
+export function resolveTierPrice(
+  basePrice: number,
+  tiers: PriceTier[] | null | undefined,
+  qty: number
+): number {
+  if (!tiers || tiers.length === 0 || !(qty > 0)) return basePrice;
+  let best: PriceTier | null = null;
+  for (const t of tiers) {
+    if (t.min_qty <= qty && t.price > 0 && (!best || t.min_qty > best.min_qty)) {
+      best = t;
+    }
+  }
+  return best ? best.price : basePrice;
+}
+
+export interface TierMarginRow {
+  /** 구간 시작 수량 (0 = 기본 단가) */
+  minQty: number;
+  supplyPrice: number;
+  quotePrice: number;
+  /** 개당 유통 마진 = 견적가 − 공급가 */
+  marginPerUnit: number;
+  /** 개당 순마진 = 견적가 − 공급가 − KOL RS(공구가 × KOL%) */
+  netMarginPerUnit: number;
+  /** 구간 시작 수량 기준 총 순마진 */
+  totalNetMargin: number;
+}
+
+/**
+ * [공급가형] 구간별 마진 테이블 — 공급가·견적가 구간의 모든 경계 수량에서
+ * 개당 마진과 순마진을 비교. 담당자가 구간 견적을 짤 때 한눈에 보는 용도.
+ */
+export function buildTierMarginRows(params: {
+  supplyPrice: number;
+  supplyTiers?: PriceTier[] | null;
+  /** 기본 견적가. 0이면 공구가 직접 판매 기준 */
+  quotePrice: number;
+  quoteTiers?: PriceTier[] | null;
+  gongguPrice: number;
+  kolRsRatePct: number;
+}): TierMarginRow[] {
+  const {
+    supplyPrice,
+    supplyTiers,
+    quotePrice,
+    quoteTiers,
+    gongguPrice,
+    kolRsRatePct,
+  } = params;
+  const baseQuote = quotePrice > 0 ? quotePrice : gongguPrice;
+  if (supplyPrice <= 0 || baseQuote <= 0) return [];
+  const breakpoints = new Set<number>([0]);
+  for (const t of supplyTiers ?? []) {
+    if (t.min_qty > 0 && t.price > 0) breakpoints.add(t.min_qty);
+  }
+  for (const t of quoteTiers ?? []) {
+    if (t.min_qty > 0 && t.price > 0) breakpoints.add(t.min_qty);
+  }
+  const kolPerUnit = gongguPrice * (kolRsRatePct / 100);
+  return [...breakpoints]
+    .sort((a, b) => a - b)
+    .map((q) => {
+      const s = resolveTierPrice(supplyPrice, supplyTiers, q);
+      const c = resolveTierPrice(baseQuote, quoteTiers, q);
+      const marginPerUnit = c - s;
+      const netMarginPerUnit = marginPerUnit - kolPerUnit;
+      return {
+        minQty: q,
+        supplyPrice: s,
+        quotePrice: c,
+        marginPerUnit,
+        netMarginPerUnit,
+        totalNetMargin: q * netMarginPerUnit,
+      };
+    });
+}
 
 // 판정 기준 (마진율 AND 절대금액)
 export const FEASIBILITY = {
@@ -51,7 +137,6 @@ export interface EconomicsInput {
   influencerRsRate: number; // %
   vendorFeeRate: number; // %
   totalRsRate?: number | null; // 클라이언트 승인 총 RS(%)
-  vatIncluded: boolean;
   normalPrice: number;
   onlineMinPrice: number;
 }
@@ -59,8 +144,6 @@ export interface EconomicsInput {
 export interface UnitEconomics {
   dealType: DealType;
   gongguPrice: number;
-  /** 소비자 실결제가 (VAT 별도면 공구가 × 1.1) */
-  consumerPrice: number;
   /** 클라이언트 몫/개 — RS형: 공구가×(1−총RS%), 공급가형: 공급가 */
   clientTakePerUnit: number | null;
   /** [공급가형] 유효 셀러 견적가/개 (미입력 시 공구가). RS형은 null */
@@ -83,10 +166,10 @@ export interface UnitEconomics {
   /** 벤더사 마진 — RS형: 공구가×벤더%, 공급가형: 잔여분 */
   vendorMarginPerUnit: number;
   vendorMarginRate: number;
-  /** 소비자 실결제가 기준 할인율 */
+  /** 공구가(부가세 포함) 기준 할인율 */
   normalDiscountRate: number;
   onlineMinDiscountRate: number;
-  /** 공구가(실결제가)가 온라인 최저가 이상 → 가격 메리트 없음 */
+  /** 공구가가 온라인 최저가 이상 → 가격 메리트 없음 */
   hasNoPriceMerit: boolean;
 }
 
@@ -99,14 +182,9 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     influencerRsRate,
     vendorFeeRate,
     totalRsRate,
-    vatIncluded,
     normalPrice,
     onlineMinPrice,
   } = input;
-
-  const consumerPrice = vatIncluded
-    ? gongguPrice
-    : Math.round(gongguPrice * (1 + VAT_RATE));
 
   const kolPerUnit = gongguPrice * (influencerRsRate / 100);
   const hasBudget = totalRsRate != null && totalRsRate > 0;
@@ -164,7 +242,6 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
   return {
     dealType,
     gongguPrice,
-    consumerPrice,
     clientTakePerUnit,
     sellerQuotePerUnit,
     sellerTakePerUnit,
@@ -178,15 +255,15 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     vendorMarginPerUnit,
     vendorMarginRate,
     normalDiscountRate:
-      normalPrice > 0 && consumerPrice > 0
-        ? ((normalPrice - consumerPrice) / normalPrice) * 100
+      normalPrice > 0 && gongguPrice > 0
+        ? ((normalPrice - gongguPrice) / normalPrice) * 100
         : 0,
     onlineMinDiscountRate:
-      onlineMinPrice > 0 && consumerPrice > 0
-        ? ((onlineMinPrice - consumerPrice) / onlineMinPrice) * 100
+      onlineMinPrice > 0 && gongguPrice > 0
+        ? ((onlineMinPrice - gongguPrice) / onlineMinPrice) * 100
         : 0,
     hasNoPriceMerit:
-      onlineMinPrice > 0 && consumerPrice > 0 && consumerPrice >= onlineMinPrice,
+      onlineMinPrice > 0 && gongguPrice > 0 && gongguPrice >= onlineMinPrice,
   };
 }
 

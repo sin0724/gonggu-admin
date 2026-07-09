@@ -22,6 +22,15 @@ export default async function DashboardPage() {
     .from("influencers")
     .select("*", { count: "exact", head: true });
 
+  // 재무 확정 취급액 (재무관리 시스템에서 동기화)
+  const { data: financeRows } = await supabase
+    .from("campaign_finance")
+    .select("confirmed_sales");
+  const totalConfirmedSales = (financeRows ?? []).reduce(
+    (sum, r) => sum + (r.confirmed_sales || 0),
+    0
+  );
+
   const totalCampaigns = campaigns?.length ?? 0;
   const activeCampaigns =
     campaigns?.filter((c) => isCampaignActive(c.start_date, c.end_date))
@@ -73,6 +82,17 @@ export default async function DashboardPage() {
       color: "bg-gray-50 text-gray-600",
       href: "/campaigns",
     },
+    ...(totalConfirmedSales > 0
+      ? [
+          {
+            label: "확정 취급액",
+            value: fmtWon(totalConfirmedSales),
+            sub: "재무 확정 기준 누적",
+            color: "bg-purple-50 text-purple-600",
+            href: "/campaigns",
+          },
+        ]
+      : []),
     {
       label: "벤더사 누적 마진",
       value: fmtWon(totalVendorMargin),

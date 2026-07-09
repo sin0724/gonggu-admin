@@ -66,6 +66,18 @@ export default async function CampaignDetailPage({
     .eq("campaign_id", id)
     .order("created_at", { ascending: false });
 
+  // 재무 확정 취급액 — 재무관리 시스템에서 월별로 동기화 (읽기 전용)
+  const { data: financeRows } = await supabase
+    .from("campaign_finance")
+    .select("year, month, confirmed_sales, synced_at")
+    .eq("campaign_id", id)
+    .order("year")
+    .order("month");
+  const confirmedTotal = (financeRows ?? []).reduce(
+    (sum, r) => sum + (r.confirmed_sales || 0),
+    0
+  );
+
   const records = (rawRecords ?? []) as CampaignInfluencerWithDetails[];
   const active = isCampaignActive(campaign.start_date, campaign.end_date);
 
@@ -246,6 +258,37 @@ export default async function CampaignDetailPage({
           )}
         </div>
       </div>
+
+      {/* 재무 확정 취급액 — 재무관리 시스템 동기화 데이터 */}
+      {financeRows && financeRows.length > 0 && (
+        <div className="card p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 className="text-base font-semibold text-gray-900">
+              확정 취급액
+              <span className="ml-2 badge bg-purple-100 text-purple-700">재무 확정</span>
+            </h2>
+            <span className="text-sm text-gray-500">
+              누적 <b className="text-gray-900">{formatMoney(confirmedTotal, rate)}</b>
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {financeRows.map((r) => (
+              <div
+                key={`${r.year}-${r.month}`}
+                className="rounded-lg bg-purple-50 px-3 py-2 text-sm"
+              >
+                <span className="text-purple-500 text-xs mr-2">{r.year}년 {r.month}월</span>
+                <span className="font-semibold text-purple-900">
+                  {formatMoney(r.confirmed_sales, rate)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 mt-3">
+            재무관리 시스템에서 확정된 월별 취급액입니다.
+          </p>
+        </div>
+      )}
 
       {/* 목표 KPI · 재원 분배 */}
       {targetDist && (

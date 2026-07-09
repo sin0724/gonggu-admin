@@ -24,8 +24,23 @@ export interface Database {
         Insert: CampaignInfluencerInsert;
         Update: CampaignInfluencerUpdate;
       };
+      campaign_finance: {
+        Row: CampaignFinance;
+        Insert: never; // 재무관리 시스템(service role)만 기록
+        Update: never;
+      };
     };
   };
+}
+
+/** 재무관리 시스템에서 동기화되는 월별 확정 취급액 (읽기 전용) */
+export interface CampaignFinance {
+  id: string;
+  campaign_id: string;
+  year: number;
+  month: number;
+  confirmed_sales: number;
+  synced_at: string;
 }
 
 export type DealType = "rs" | "supply";

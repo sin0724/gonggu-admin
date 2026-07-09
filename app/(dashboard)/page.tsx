@@ -1,7 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
+import { createFinanceClient } from "@/lib/supabase/finance";
 import Link from "next/link";
 import { formatDate, formatCurrency, isCampaignActive } from "@/lib/utils";
 import { getProgressStatus } from "@/types/database";
+
+// 재무 실적은 외부 프로젝트(tianxia-finance) DB에서 매번 읽어야 하므로 캐시하지 않는다.
+export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -22,14 +26,31 @@ export default async function DashboardPage() {
     .from("influencers")
     .select("*", { count: "exact", head: true });
 
-  // 재무 확정 취급액 (재무관리 시스템에서 동기화)
-  const { data: financeRows } = await supabase
-    .from("campaign_finance")
-    .select("confirmed_sales");
-  const totalConfirmedSales = (financeRows ?? []).reduce(
-    (sum, r) => sum + (r.confirmed_sales || 0),
-    0
-  );
+  // 재무 확정 취급액 — 재무관리(tianxia-finance)의 공구 사업부 실적을 직접 합산.
+  // campaign_finance(동기화 사본)는 재무팀이 캠페인 연동 행을 저장할 때만 갱신되어
+  // 셀러 입금 자동 기록(campaign_id 없는 행)이 빠지므로, 연동 키가 있으면
+  // gonggu_sales 전체를 실시간으로 읽고 없을 때만 사본으로 폴백한다.
+  let totalConfirmedSales = 0;
+  let confirmedSub = "재무관리 시스템 확정 기준 누적";
+  const finance = createFinanceClient();
+  const { data: gongguSales } = finance
+    ? await finance.from("gonggu_sales").select("gross_sales")
+    : { data: null };
+  if (gongguSales) {
+    totalConfirmedSales = gongguSales.reduce(
+      (sum, r) => sum + (r.gross_sales || 0),
+      0
+    );
+    confirmedSub = "재무 공구 사업부 실적 누적 (셀러 입금 포함)";
+  } else {
+    const { data: financeRows } = await supabase
+      .from("campaign_finance")
+      .select("confirmed_sales");
+    totalConfirmedSales = (financeRows ?? []).reduce(
+      (sum, r) => sum + (r.confirmed_sales || 0),
+      0
+    );
+  }
 
   const totalCampaigns = campaigns?.length ?? 0;
   const activeCampaigns =
@@ -65,7 +86,7 @@ export default async function DashboardPage() {
     {
       label: "확정 취급액",
       value: fmtWon(totalConfirmedSales),
-      sub: "재무관리 시스템 확정 기준 누적",
+      sub: confirmedSub,
       color: "bg-purple-50 text-purple-600",
       href: "/campaigns",
     },

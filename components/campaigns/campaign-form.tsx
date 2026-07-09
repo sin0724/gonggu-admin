@@ -9,6 +9,7 @@ import {
   computeUnitEconomics,
   judgeFeasibility,
   recommendGongguPrice,
+  recommendSellerQuote,
   minPriceForVendorTarget,
   distributeSales,
   FEASIBILITY,
@@ -78,6 +79,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     normal_price: campaign?.normal_price?.toString() ?? "",
     online_min_price: campaign?.online_min_price?.toString() ?? "",
     supply_price: campaign?.supply_price?.toString() ?? "",
+    seller_quote_price: campaign?.seller_quote_price?.toString() ?? "",
     gonggu_price: campaign?.gonggu_price?.toString() ?? "",
     exchange_rate: campaign?.exchange_rate?.toString() ?? "",
     target_sales: campaign?.target_sales?.toString() ?? "",
@@ -154,6 +156,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           normal_price: conv(prev.normal_price),
           online_min_price: conv(prev.online_min_price),
           supply_price: conv(prev.supply_price),
+          seller_quote_price: conv(prev.seller_quote_price),
           gonggu_price: conv(prev.gonggu_price),
         };
       });
@@ -190,6 +193,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const normalPrice = toKrw(parseFloat(formData.normal_price) || 0);
   const onlineMinPrice = toKrw(parseFloat(formData.online_min_price) || 0);
   const supplyPrice = toKrw(parseFloat(formData.supply_price) || 0);
+  const sellerQuotePrice = toKrw(parseFloat(formData.seller_quote_price) || 0);
   const gongguPrice = toKrw(parseFloat(formData.gonggu_price) || 0);
   // 헤드라인 금액 — TWD 메인 · 원화 보조 ("NT$690 · 30,000원"), 환율 없으면 원화만
   const moneyText = (n: number) => {
@@ -206,6 +210,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     dealType,
     gongguPrice,
     supplyPrice,
+    sellerQuotePrice,
     influencerRsRate,
     vendorFeeRate,
     totalRsRate: totalRsRate > 0 ? totalRsRate : null,
@@ -228,6 +233,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           sales: targetSales,
           gongguPrice,
           supplyPrice,
+          sellerQuotePrice,
           influencerRsRate,
           vendorFeeRate,
           totalRsRate: totalRsRate > 0 ? totalRsRate : null,
@@ -253,12 +259,27 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     onlineMinPrice > 0 &&
     recommendedConsumerPrice >= onlineMinPrice;
 
+  // [공급가형] 추천 셀러 견적가 (벤더 목표 마진 기준)
+  const recQuote =
+    dealType === "supply" && supplyPrice > 0 && gongguPrice > 0
+      ? recommendSellerQuote({
+          supplyPrice,
+          gongguPrice,
+          kolRsRatePct: influencerRsRate,
+          targetVendorMargin: targetMargin,
+          targetUnit: targetMarginUnit,
+        })
+      : null;
+
   // [공급가형] 수용 가능 최대 공급가 (클라이언트 협상용)
+  // 우리 매출/개 = 견적가 (미입력 시 공구가 직접 판매)
+  const revenueBase = sellerQuotePrice > 0 ? sellerQuotePrice : gongguPrice;
   const maxSupplyPrice =
-    gongguPrice > 0
+    revenueBase > 0 && gongguPrice > 0
       ? targetMarginUnit === "won"
-        ? gongguPrice * (1 - influencerRsRate / 100) - targetMargin
-        : gongguPrice * (1 - influencerRsRate / 100 - targetMargin / 100)
+        ? revenueBase - gongguPrice * (influencerRsRate / 100) - targetMargin
+        : revenueBase -
+          gongguPrice * ((influencerRsRate + targetMargin) / 100)
       : 0;
 
   // [RS형] 목표 마진(원/건) 달성 최소 공구가 — 마진율은 벤더%로 고정이므로 원 기준만 의미 있음
@@ -308,6 +329,11 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         supply_price:
           dealType === "supply" && formData.supply_price
             ? Math.round(supplyPrice)
+            : null,
+        // 공급가형: 대만 총판/셀러 견적 단가 (마진 계산 기준)
+        seller_quote_price:
+          dealType === "supply" && formData.seller_quote_price
+            ? Math.round(sellerQuotePrice)
             : null,
         gonggu_price: formData.gonggu_price ? Math.round(gongguPrice) : null,
         exchange_rate: formData.exchange_rate ? parseFloat(formData.exchange_rate) : null,
@@ -433,7 +459,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         <p className="text-xs text-gray-400 mb-4">
           {dealType === "rs"
             ? "공구가 × 총 RS% = 가용 재원. 그 재원을 KOL과 벤더사가 나누고, 클라이언트 몫은 공구가 × (1 − 총 RS%)로 자동 계산됩니다."
-            : "공구가 − 공급가 = 가용 재원. 그 재원에서 KOL RS를 주고 남는 것이 벤더사(우리) 마진입니다."}
+            : "브랜드가 준 공급가에 마진을 붙여 대만 총판/셀러에게 견적가로 공급합니다. 견적가 − 공급가 − KOL RS = 벤더사(우리) 마진. 셀러 견적가 미입력 시 공구가에 직접 판매하는 것으로 계산합니다."}
         </p>
 
         {/* 환율 — 1 TWD 당 원화. 입력 시 모든 금액이 TWD 메인으로 표기됨 */}
@@ -478,12 +504,12 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             onClick={() => setDealType("supply")}
             className={`btn btn-sm ${dealType === "supply" ? "btn-primary" : "btn-secondary"}`}
           >
-            공급가형 — 개당 단가로 합의
+            공급가형 — 공급가 + 마진 → 셀러 견적
           </button>
           <span className="text-xs text-gray-400 ml-1">
             {dealType === "rs"
               ? "대부분의 딜 · 공급가 입력 불필요"
-              : "클라이언트가 원 단위 단가를 제시한 경우"}
+              : "브랜드가 공급가를 주고 우리가 대만 총판/셀러에 공급하는 딜"}
           </span>
         </div>
         {mode === "edit" && (
@@ -534,11 +560,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           </div>
 
           {/* 가격 */}
-          <div
-            className={`grid grid-cols-2 gap-4 ${
-              dealType === "supply" ? "md:grid-cols-4" : "md:grid-cols-3"
-            }`}
-          >
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="label">정상가 ({unitLabel})</label>
               <input
@@ -580,8 +602,52 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 <PriceCaption
                   value={supplyPrice}
                   rate={rate}
-                  suffix="· 클라이언트 몫 (개당 정산 단가)"
+                  suffix="· 브랜드 정산 단가 (우리 원가)"
                 />
+              </div>
+            )}
+            {dealType === "supply" && (
+              <div>
+                <label className="label">셀러 견적가 ({unitLabel})</label>
+                <input
+                  type="number"
+                  name="seller_quote_price"
+                  value={formData.seller_quote_price}
+                  onChange={handleChange}
+                  className="input"
+                  placeholder="예: 21,000"
+                  min="0"
+                />
+                {sellerQuotePrice > 0 ? (
+                  <>
+                    <PriceCaption
+                      value={sellerQuotePrice}
+                      rate={rate}
+                      suffix="· 대만 총판/셀러 공급 단가 (우리 매출)"
+                    />
+                    {supplyPrice > 0 && (
+                      <p
+                        className={`text-xs mt-0.5 ${
+                          sellerQuotePrice > supplyPrice
+                            ? "text-blue-500"
+                            : "text-red-500"
+                        }`}
+                      >
+                        공급가 대비 마진 {fmt(sellerQuotePrice - supplyPrice)}원 (
+                        {supplyPrice > 0
+                          ? fmtRate(
+                              ((sellerQuotePrice - supplyPrice) / supplyPrice) * 100
+                            )
+                          : "0"}
+                        %)
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-1">
+                    미입력 시 공구가 직접 판매로 계산
+                  </p>
+                )}
               </div>
             )}
             <div>
@@ -680,7 +746,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               />
               <p className="text-xs text-gray-400 mt-1">
                 {dealType === "supply" && supplyPrice > 0
-                  ? "공급가 입력 시 실제 마진은 잔여분으로 자동 계산"
+                  ? sellerQuotePrice > 0
+                    ? "실제 마진 = 견적가 − 공급가 − KOL RS 자동 계산"
+                    : "공급가 입력 시 실제 마진은 잔여분으로 자동 계산"
                   : "우리 회사 몫 (클라이언트에게 비공개)"}
               </p>
             </div>
@@ -695,10 +763,43 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                   공급가와 승인 총 RS가 모순됩니다
                 </p>
                 <p className="text-xs text-red-600 mt-0.5">
-                  공급가 {fmt(supplyPrice)}원 기준으로 실제 줄 수 있는 RS는 최대{" "}
-                  <b>{fmtRate(econ.maxRsRate)}%</b>인데, 승인 총 RS는{" "}
-                  {fmtRate(totalRsRate)}%입니다. 공급가를 낮추거나 공구가를
-                  올리거나 총 RS를 재확인해야 합니다.
+                  {sellerQuotePrice > 0
+                    ? `견적가 ${fmt(sellerQuotePrice)}원 − 공급가 ${fmt(supplyPrice)}원 기준으로`
+                    : `공급가 ${fmt(supplyPrice)}원 기준으로`}{" "}
+                  실제 줄 수 있는 RS는 최대 <b>{fmtRate(econ.maxRsRate)}%</b>
+                  인데, 승인 총 RS는 {fmtRate(totalRsRate)}%입니다. 공급가를
+                  낮추거나 견적가·공구가를 올리거나 총 RS를 재확인해야 합니다.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* 정합성 경고: 견적가 vs 공급가 / 공구가 */}
+          {econ.quoteBelowSupply && (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+              <span className="text-red-500 text-base mt-0.5">⚠</span>
+              <div>
+                <p className="text-sm font-semibold text-red-700">
+                  셀러 견적가가 공급가 이하입니다 — 역마진
+                </p>
+                <p className="text-xs text-red-600 mt-0.5">
+                  견적가 {fmt(sellerQuotePrice)}원 ≤ 공급가 {fmt(supplyPrice)}원.
+                  견적가는 공급가에 마진을 붙인 금액이어야 합니다.
+                </p>
+              </div>
+            </div>
+          )}
+          {econ.quoteAboveGonggu && (
+            <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
+              <span className="text-orange-500 text-base mt-0.5">⚠</span>
+              <div>
+                <p className="text-sm font-semibold text-orange-700">
+                  셀러 견적가가 공구가보다 높습니다
+                </p>
+                <p className="text-xs text-orange-600 mt-0.5">
+                  견적가 {fmt(sellerQuotePrice)}원 &gt; 공구가 {fmt(gongguPrice)}
+                  원. 셀러가 소비자 판매가보다 비싸게 사입하게 되어 딜이
+                  성립하지 않습니다.
                 </p>
               </div>
             </div>
@@ -922,8 +1023,45 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 </div>
               </div>
 
-              {/* 방향 ①: 공급가 → 추천 공구가 */}
-              {supplyPrice > 0 && (
+              {/* 방향 ①: 공급가 + 목표 마진 → 추천 셀러 견적가 */}
+              {recQuote && (
+                <div>
+                  <p className="text-xs text-blue-600 font-medium mb-1">
+                    추천 셀러 견적가 (목표 마진 기준)
+                  </p>
+                  <div className="flex items-end gap-2">
+                    <p className="text-2xl font-bold text-blue-700">
+                      {rate !== null
+                        ? formatTwd(krwToTwd(recQuote.rounded, rate)!)
+                        : `${fmt(recQuote.rounded)}원`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          seller_quote_price: priceToField(recQuote.rounded),
+                        }))
+                      }
+                      className="btn-secondary btn-sm mb-0.5"
+                    >
+                      적용
+                    </button>
+                  </div>
+                  {rate !== null && (
+                    <p className="text-xs text-blue-400 mt-0.5">
+                      {fmt(recQuote.rounded)}원
+                    </p>
+                  )}
+                  <p className="text-xs text-blue-400 mt-0.5">
+                    공급가 + KOL RS(공구가 × {influencerRsRate}%) + 목표 마진.
+                    셀러에게 이 이상으로 견적해야 목표 마진이 남습니다.
+                  </p>
+                </div>
+              )}
+
+              {/* 방향 ②: 공급가 → 추천 공구가 (직접 판매 시) */}
+              {supplyPrice > 0 && sellerQuotePrice === 0 && (
                 <div>
                   <p className="text-xs text-blue-600 font-medium mb-1">
                     추천 공구가 (공급가 기준)
@@ -963,7 +1101,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 </div>
               )}
 
-              {/* 방향 ②: 공구가 → 수용 가능 최대 공급가 (클라이언트 협상용) */}
+              {/* 방향 ③: 견적가(또는 공구가) → 수용 가능 최대 공급가 (브랜드 협상용) */}
               {gongguPrice > 0 && (
                 <div>
                   <p className="text-xs text-blue-600 font-medium mb-1">
@@ -989,8 +1127,11 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                     );
                   })()}
                   <p className="text-xs text-blue-400 mt-0.5">
-                    공구가 {fmt(gongguPrice)}원에서 KOL {influencerRsRate}%와
-                    목표 마진을 확보하려면 공급가는 이 이하여야 합니다.
+                    {sellerQuotePrice > 0
+                      ? `견적가 ${fmt(sellerQuotePrice)}원에서`
+                      : `공구가 ${fmt(gongguPrice)}원(직접 판매)에서`}{" "}
+                    KOL {influencerRsRate}%와 목표 마진을 확보하려면 공급가는 이
+                    이하여야 합니다.
                   </p>
                 </div>
               )}
@@ -1004,13 +1145,10 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               </p>
             )}
             <p className="text-xs text-blue-400 leading-relaxed">
-              공식: 추천 공구가 = (공급가
-              {targetMarginUnit === "won" && ` + 목표마진 ${fmt(targetMargin)}원`}
-              ) ÷ (1 − KOL {influencerRsRate}%
-              {targetMarginUnit === "pct" && ` − 목표마진율 ${targetMargin}%`}) ·
-              최대 공급가 = 공구가 × (1 − KOL%
-              {targetMarginUnit === "pct" ? " − 목표마진율" : ") − 목표마진"}
-              {targetMarginUnit === "pct" && ")"}
+              공식: 벤더 마진 = 셀러 견적가 − 공급가 − KOL RS(공구가 × KOL%) ·
+              추천 견적가 = 공급가 + KOL RS + 목표마진
+              {targetMarginUnit === "pct" && "(공구가 × %)"} · 최대 공급가 =
+              견적가(미입력 시 공구가) − KOL RS − 목표마진
             </p>
           </div>
         )}
@@ -1096,16 +1234,39 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                   </p>
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-200 text-sm">
-                      <span className="text-gray-600">공구가</span>
+                      <span className="text-gray-600">공구가 (소비자 판매가)</span>
                       <span className="font-semibold text-gray-900">
                         +{moneyText(gongguPrice)}
                       </span>
                     </div>
+                    {dealType === "supply" &&
+                      sellerQuotePrice > 0 &&
+                      econ.sellerTakePerUnit !== null &&
+                      econ.sellerQuotePerUnit !== null && (
+                        <>
+                          <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-200 text-sm">
+                            <span className="text-gray-600">
+                              대만 셀러 몫 차감 (공구가 − 견적가)
+                            </span>
+                            <span className="font-semibold text-red-500">
+                              -{moneyText(econ.sellerTakePerUnit)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-300 text-sm">
+                            <span className="text-gray-700 font-medium">
+                              셀러 견적가 (우리 매출/개)
+                            </span>
+                            <span className="font-bold text-gray-900">
+                              {moneyText(econ.sellerQuotePerUnit)}
+                            </span>
+                          </div>
+                        </>
+                      )}
                     <div className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-gray-200 text-sm">
                       <span className="text-gray-600">
                         {dealType === "rs"
                           ? `클라이언트 몫 차감 (공구가 × ${fmtRate(100 - (econ.maxRsRate ?? 0))}%)`
-                          : "공급가 차감 (클라이언트 몫)"}
+                          : "공급가 차감 (브랜드 정산 단가)"}
                       </span>
                       <span className="font-semibold text-red-500">
                         -{moneyText(econ.clientTakePerUnit)}
@@ -1401,7 +1562,11 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         </div>
 
         {targetDist ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div
+            className={`grid grid-cols-2 gap-3 ${
+              targetDist.sellerTake > 0 ? "md:grid-cols-5" : "md:grid-cols-4"
+            }`}
+          >
             <div className="card p-4 bg-gray-50">
               <p className="text-xs text-gray-400 mb-1">목표 판매액</p>
               <p className="text-lg font-bold text-gray-900">
@@ -1454,6 +1619,25 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 %
               </p>
             </div>
+
+            {targetDist.sellerTake > 0 && (
+              <div className="card p-4">
+                <p className="text-xs text-gray-400 mb-1">대만 셀러 몫</p>
+                <p className="text-lg font-bold text-teal-600">
+                  {rate !== null
+                    ? formatTwd(krwToTwd(targetDist.sellerTake, rate)!)
+                    : `${fmt(targetDist.sellerTake)}원`}
+                </p>
+                <p className="text-xs text-gray-400">
+                  {rate !== null && `${fmt(targetDist.sellerTake)}원 · `}
+                  판매액의{" "}
+                  {targetSales > 0
+                    ? fmtRate((targetDist.sellerTake / targetSales) * 100)
+                    : "0"}
+                  %
+                </p>
+              </div>
+            )}
 
             <div className="card p-4 border-blue-200 bg-blue-50">
               <p className="text-xs text-blue-600 font-medium mb-1">

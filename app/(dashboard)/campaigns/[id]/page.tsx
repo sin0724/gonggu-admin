@@ -84,6 +84,7 @@ export default async function CampaignDetailPage({
   const vendorFeeRate = campaign.vendor_fee_rate ?? 0;
   const influencerRsRate = campaign.influencer_rs_rate ?? 0;
   const supplyPrice = campaign.supply_price ?? 0;
+  const sellerQuotePrice = campaign.seller_quote_price ?? 0;
   const rate = campaign.exchange_rate;
 
   const formatCurrency = (n: number) =>
@@ -124,9 +125,15 @@ export default async function CampaignDetailPage({
     vendorNote = `판매액 × 총 RS ${totalRsEff}% − KOL 지급액`;
   } else if (isSupplyDeal) {
     clientPayout = quantity * supplyPrice;
-    totalVendorMargin = totalSales - clientPayout - totalKolRs;
+    if (sellerQuotePrice > 0) {
+      // 셀러 경유: 우리 매출 = 수량 × 견적가. 브랜드 정산·KOL 지급 후가 마진.
+      totalVendorMargin = quantity * (sellerQuotePrice - supplyPrice) - totalKolRs;
+      vendorNote = `수량 × (견적가 ${formatMoney(sellerQuotePrice, rate)} − 공급가) − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
+    } else {
+      totalVendorMargin = totalSales - clientPayout - totalKolRs;
+      vendorNote = `판매액 − 공급가 − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
+    }
     payoutNote = `수량 × 공급가 ${formatMoney(supplyPrice, rate)}${isQuantityEstimated ? " · 수량 추정" : ""}`;
-    vendorNote = `판매액 − 공급가 − KOL${isQuantityEstimated ? " · 수량 추정" : ""}`;
   } else {
     totalVendorMargin = totalSales * (vendorFeeRate / 100);
     clientPayout = totalSales - totalVendorMargin - totalKolRs;
@@ -146,6 +153,7 @@ export default async function CampaignDetailPage({
           sales: targetSales,
           gongguPrice: campaign.gonggu_price ?? 0,
           supplyPrice,
+          sellerQuotePrice,
           influencerRsRate,
           vendorFeeRate,
           totalRsRate: campaign.total_rs_rate ?? null,
@@ -224,6 +232,20 @@ export default async function CampaignDetailPage({
                 </>
               )}
               공구가 {formatMoney(campaign.gonggu_price, rate)}
+              {dealType === "supply" && supplyPrice > 0 && (
+                <>
+                  <span className="text-gray-300">|</span>
+                  <span>공급가 {formatMoney(supplyPrice, rate)}</span>
+                </>
+              )}
+              {dealType === "supply" && sellerQuotePrice > 0 && (
+                <>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-teal-600 font-medium">
+                    셀러 견적가 {formatMoney(sellerQuotePrice, rate)}
+                  </span>
+                </>
+              )}
               <span className="text-gray-300">|</span>
               <span className="text-blue-600 font-medium">벤더 {vendorFeeRate}%</span>
               <span className="text-gray-300">|</span>

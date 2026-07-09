@@ -9,9 +9,13 @@
 //    벤더사 마진 = 공구가 × 벤더% (총 RS − KOL%)
 //
 // ② 공급가형 (deal_type = "supply")
-//    클라이언트와 "개당 단가(공급가)"로 합의. 클라이언트 몫이 원 단위로 고정.
-//    → 가용 재원 = 공구가 − 공급가 (RS율은 파생값)
-//    벤더사 마진 = 공구가 − 공급가 − KOL RS (잔여분)
+//    브랜드(클라이언트)가 우리에게 "개당 단가(공급가)"를 주고, 우리가 마진을
+//    붙여 대만 총판/셀러에게 견적가로 공급. 셀러가 소비자에게 공구가로 판매.
+//    돈 흐름: 소비자(공구가) → 셀러(견적가로 우리에게 지불) → 우리(공급가로 브랜드 정산)
+//    → 우리 매출/개 = 셀러 견적가, 셀러 몫 = 공구가 − 견적가
+//    → 가용 재원 = 견적가 − 공급가 (KOL + 벤더가 나눌 돈)
+//    벤더사 마진 = 견적가 − 공급가 − KOL RS (잔여분)
+//    견적가 미입력 시 공구가에 직접 판매하는 것으로 간주 (견적가 = 공구가).
 //
 // 공통:
 //  - 클라이언트의 원가·마진은 우리가 알 수 없고 판단 대상이 아니다.
@@ -42,6 +46,8 @@ export interface EconomicsInput {
   gongguPrice: number;
   /** 공급가형에서만 사용 (RS형은 파생값) */
   supplyPrice: number;
+  /** [공급가형] 대만 총판/셀러 견적 단가. 0/미입력이면 공구가 직접 판매로 간주 */
+  sellerQuotePrice?: number;
   influencerRsRate: number; // %
   vendorFeeRate: number; // %
   totalRsRate?: number | null; // 클라이언트 승인 총 RS(%)
@@ -57,14 +63,22 @@ export interface UnitEconomics {
   consumerPrice: number;
   /** 클라이언트 몫/개 — RS형: 공구가×(1−총RS%), 공급가형: 공급가 */
   clientTakePerUnit: number | null;
+  /** [공급가형] 유효 셀러 견적가/개 (미입력 시 공구가). RS형은 null */
+  sellerQuotePerUnit: number | null;
+  /** [공급가형] 셀러 몫/개 = 공구가 − 견적가. 직접 판매(견적가 미입력)면 0 */
+  sellerTakePerUnit: number | null;
   /** 가용 재원/개 (KOL + 벤더가 나눌 돈) */
   availablePool: number | null;
-  /** 가용 재원율(%) — RS형: 총RS, 공급가형: (공구가−공급가)/공구가 */
+  /** 가용 재원율(%) — RS형: 총RS, 공급가형: (견적가−공급가)/공구가 */
   maxRsRate: number | null;
   /** KOL% + 벤더%가 승인 총 RS 한도를 초과 */
   rsBudgetOver: boolean;
   /** 공급가형: 승인 총 RS가 공급가 기준 가능 RS를 초과 — 조건 모순 */
   supplyRsConflict: boolean;
+  /** [공급가형] 견적가가 공급가 이하 — 역마진 */
+  quoteBelowSupply: boolean;
+  /** [공급가형] 견적가가 공구가 초과 — 셀러가 소비자가보다 비싸게 사는 모순 */
+  quoteAboveGonggu: boolean;
   kolPerUnit: number;
   /** 벤더사 마진 — RS형: 공구가×벤더%, 공급가형: 잔여분 */
   vendorMarginPerUnit: number;
@@ -81,6 +95,7 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     dealType,
     gongguPrice,
     supplyPrice,
+    sellerQuotePrice = 0,
     influencerRsRate,
     vendorFeeRate,
     totalRsRate,
@@ -97,10 +112,14 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
   const hasBudget = totalRsRate != null && totalRsRate > 0;
 
   let clientTakePerUnit: number | null = null;
+  let sellerQuotePerUnit: number | null = null;
+  let sellerTakePerUnit: number | null = null;
   let availablePool: number | null = null;
   let maxRsRate: number | null = null;
   let vendorMarginPerUnit: number;
   let supplyRsConflict = false;
+  let quoteBelowSupply = false;
+  let quoteAboveGonggu = false;
 
   if (dealType === "rs") {
     // RS형: 총 RS%가 합의값. 미입력 시 KOL+벤더 합으로 간주.
@@ -114,18 +133,26 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     }
     vendorMarginPerUnit = gongguPrice * (vendorFeeRate / 100);
   } else {
-    // 공급가형: 공급가가 합의값. 간극이 재원.
+    // 공급가형: 브랜드 공급가에 마진을 붙여 셀러에게 견적. 견적가 − 공급가가 재원.
+    // 견적가 미입력 시 공구가 직접 판매(견적가 = 공구가)로 간주.
     const hasSupply = supplyPrice > 0 && gongguPrice > 0;
+    const effectiveQuote = sellerQuotePrice > 0 ? sellerQuotePrice : gongguPrice;
     if (hasSupply) {
       clientTakePerUnit = supplyPrice;
-      availablePool = gongguPrice - supplyPrice;
-      maxRsRate = ((gongguPrice - supplyPrice) / gongguPrice) * 100;
+      sellerQuotePerUnit = effectiveQuote;
+      sellerTakePerUnit = gongguPrice - effectiveQuote;
+      availablePool = effectiveQuote - supplyPrice;
+      maxRsRate = ((effectiveQuote - supplyPrice) / gongguPrice) * 100;
     }
     vendorMarginPerUnit = hasSupply
-      ? gongguPrice - supplyPrice - kolPerUnit
+      ? effectiveQuote - supplyPrice - kolPerUnit
       : gongguPrice * (vendorFeeRate / 100);
     supplyRsConflict =
       hasBudget && maxRsRate !== null && totalRsRate! > maxRsRate + 0.5;
+    quoteBelowSupply =
+      sellerQuotePrice > 0 && supplyPrice > 0 && sellerQuotePrice <= supplyPrice;
+    quoteAboveGonggu =
+      sellerQuotePrice > 0 && gongguPrice > 0 && sellerQuotePrice > gongguPrice;
   }
 
   const vendorMarginRate =
@@ -139,10 +166,14 @@ export function computeUnitEconomics(input: EconomicsInput): UnitEconomics {
     gongguPrice,
     consumerPrice,
     clientTakePerUnit,
+    sellerQuotePerUnit,
+    sellerTakePerUnit,
     availablePool,
     maxRsRate,
     rsBudgetOver,
     supplyRsConflict,
+    quoteBelowSupply,
+    quoteAboveGonggu,
     kolPerUnit,
     vendorMarginPerUnit,
     vendorMarginRate,
@@ -182,7 +213,7 @@ export function judgeFeasibility(e: UnitEconomics): Feasibility {
   }
 
   if (
-    (e.rsBudgetOver || e.supplyRsConflict || e.hasNoPriceMerit) &&
+    (e.rsBudgetOver || e.supplyRsConflict || e.hasNoPriceMerit || e.quoteAboveGonggu) &&
     level === "possible"
   ) {
     level = "conditional";
@@ -213,6 +244,30 @@ export function recommendGongguPrice(params: {
     targetUnit === "won" ? supplyPrice + targetVendorMargin : supplyPrice;
   const raw = numer / denom;
   return { raw, rounded: Math.ceil(raw / 1000) * 1000 };
+}
+
+/**
+ * [공급가형] 추천 셀러 견적가: 벤더 목표 마진을 보장하는 최소 견적가.
+ *   견적가 = 공급가 + KOL RS(공구가 × KOL%) + 목표마진(원 또는 공구가 × %)
+ * 100원 단위 올림.
+ */
+export function recommendSellerQuote(params: {
+  supplyPrice: number;
+  gongguPrice: number;
+  kolRsRatePct: number;
+  targetVendorMargin: number;
+  targetUnit: "won" | "pct";
+}): { raw: number; rounded: number } | null {
+  const { supplyPrice, gongguPrice, kolRsRatePct, targetVendorMargin, targetUnit } =
+    params;
+  if (supplyPrice <= 0 || gongguPrice <= 0) return null;
+  const kol = gongguPrice * (kolRsRatePct / 100);
+  const margin =
+    targetUnit === "won"
+      ? targetVendorMargin
+      : gongguPrice * (targetVendorMargin / 100);
+  const raw = supplyPrice + kol + margin;
+  return { raw, rounded: Math.ceil(raw / 100) * 100 };
 }
 
 /**
@@ -269,6 +324,8 @@ export interface SalesDistribution {
   kolPayout: number;
   /** 벤더사 마진 (우리) */
   vendorMargin: number;
+  /** [공급가형+견적가] 대만 셀러 몫 = (공구가 − 견적가) × 수량. 그 외 0 */
+  sellerTake: number;
   /** 공구가 기준 추정 수량 (공구가 미입력 시 null) */
   quantity: number | null;
 }
@@ -277,13 +334,16 @@ export interface SalesDistribution {
  * 특정 판매액을 돈 흐름 모델대로 분배 — 클라이언트/KOL/벤더.
  * 목표 판매액 시뮬레이션과 상세 페이지 실적 분배가 동일 모델을 쓰도록 단일화.
  *   RS형:  클라이언트 = 판매액×(1−총RS%), KOL = 판매액×KOL%, 벤더 = 판매액×벤더%
- *   공급가형: 수량 = 판매액÷공구가, 클라이언트 = 수량×공급가, KOL = 판매액×KOL%, 벤더 = 잔여분
+ *   공급가형: 수량 = 판매액÷공구가, 클라이언트 = 수량×공급가, KOL = 판매액×KOL%,
+ *            벤더 = 수량×(견적가−공급가) − KOL, 셀러 = 잔여분
+ *            (견적가 미입력 시 공구가 직접 판매 — 벤더 = 잔여분, 셀러 = 0)
  */
 export function distributeSales(params: {
   dealType: DealType;
   sales: number;
   gongguPrice: number;
   supplyPrice: number;
+  sellerQuotePrice?: number;
   influencerRsRate: number; // %
   vendorFeeRate: number; // %
   totalRsRate?: number | null; // %
@@ -293,6 +353,7 @@ export function distributeSales(params: {
     sales,
     gongguPrice,
     supplyPrice,
+    sellerQuotePrice = 0,
     influencerRsRate,
     vendorFeeRate,
     totalRsRate,
@@ -307,13 +368,19 @@ export function distributeSales(params: {
         : influencerRsRate + vendorFeeRate;
     const clientTake = sales * (1 - totalRs / 100);
     const vendorMargin = sales * (vendorFeeRate / 100);
-    return { sales, clientTake, kolPayout, vendorMargin, quantity };
+    return { sales, clientTake, kolPayout, vendorMargin, sellerTake: 0, quantity };
   }
 
   const qty = quantity ?? 0;
   const clientTake = qty * supplyPrice;
+  if (sellerQuotePrice > 0) {
+    // 셀러 경유: 우리 매출 = 수량 × 견적가. 브랜드 정산·KOL 지급 후가 우리 마진.
+    const vendorMargin = qty * (sellerQuotePrice - supplyPrice) - kolPayout;
+    const sellerTake = sales - clientTake - kolPayout - vendorMargin;
+    return { sales, clientTake, kolPayout, vendorMargin, sellerTake, quantity };
+  }
   const vendorMargin = sales - clientTake - kolPayout;
-  return { sales, clientTake, kolPayout, vendorMargin, quantity };
+  return { sales, clientTake, kolPayout, vendorMargin, sellerTake: 0, quantity };
 }
 
 export const FEASIBILITY_LABEL: Record<Feasibility, string> = {
@@ -324,5 +391,5 @@ export const FEASIBILITY_LABEL: Record<Feasibility, string> = {
 
 export const DEAL_TYPE_LABEL: Record<DealType, string> = {
   rs: "RS형 (총 RS% 합의)",
-  supply: "공급가형 (개당 단가 합의)",
+  supply: "공급가형 (공급가 합의 · 셀러 견적 공급)",
 };

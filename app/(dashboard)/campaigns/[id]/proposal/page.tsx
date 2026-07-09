@@ -40,6 +40,8 @@ export default async function ProposalPage({ params }: ProposalPageProps) {
     dealType,
     gongguPrice,
     supplyPrice,
+    // 셀러 견적가는 우리 내부값 — 제안서(브랜드용)에는 어떤 형태로도 노출하지 않는다
+    sellerQuotePrice: campaign.seller_quote_price ?? 0,
     influencerRsRate: campaign.influencer_rs_rate ?? 0,
     vendorFeeRate: campaign.vendor_fee_rate ?? 0,
     totalRsRate,

@@ -80,11 +80,47 @@ export async function POST(request: Request) {
     const supplyTiers = (campaign?.supply_price_tiers ?? []) as PriceTier[];
     const vatMode: SupplyVatMode =
       campaign?.supply_vat_mode === "zero" ? "zero" : "taxed";
-    // 셀러 개별 단가 우선, 없으면 캠페인 구간 단가 (이 셀러 수량 기준)
+    // 셀러 견적 단가: 개별 단가 우선, 없으면 캠페인 구간 단가 (이 셀러 주문 수량 기준)
     const quote: number =
       seller.quote_price ??
       resolveTierPrice(campaign?.seller_quote_price ?? 0, quoteTiers, qty);
-    const supply = resolveTierPrice(campaign?.supply_price ?? 0, supplyTiers, qty);
+
+    // 브랜드 공급가 구간은 캠페인 총 발주량(KOL 직접 판매 + 전체 셀러) 기준 —
+    // 캠페인 상세 화면의 마진 계산과 동일한 기준을 써야 재무 기록이 어긋나지 않는다.
+    let totalQty = qty;
+    if (supplyTiers.length > 0) {
+      const [{ data: allSellers }, { data: cis }] = await Promise.all([
+        supabase
+          .from("campaign_sellers")
+          .select("quantity")
+          .eq("campaign_id", seller.campaign_id),
+        supabase
+          .from("campaign_influencers")
+          .select("quantity, sales_amount")
+          .eq("campaign_id", seller.campaign_id),
+      ]);
+      const sellerQty = (allSellers ?? []).reduce(
+        (sum, s) => sum + (s.quantity || 0),
+        0
+      );
+      const kolInput = (cis ?? []).reduce((sum, r) => sum + (r.quantity || 0), 0);
+      const gongguPrice = campaign?.gonggu_price ?? 0;
+      const kolQty =
+        kolInput > 0
+          ? kolInput
+          : gongguPrice > 0
+          ? Math.round(
+              (cis ?? []).reduce((sum, r) => sum + (r.sales_amount || 0), 0) /
+                gongguPrice
+            )
+          : 0;
+      totalQty = sellerQty + kolQty;
+    }
+    const supply = resolveTierPrice(
+      campaign?.supply_price ?? 0,
+      supplyTiers,
+      totalQty
+    );
     const grossSales = qty * quote;
     const margin =
       supply > 0 ? qty * (quote - supplyNetCost(supply, vatMode)) : 0;

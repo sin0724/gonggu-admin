@@ -549,6 +549,35 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           }
         }
 
+        // 가격 조건이 바뀌면 이미 입금 처리된 셀러의 재무 실적을 현재 조건으로 재기록.
+        // (공급가·과세 구분·구간·견적가·공구가 → 마진이 달라짐)
+        const pricingChanged =
+          payload.supply_price !== campaign.supply_price ||
+          payload.supply_vat_mode !== (campaign.supply_vat_mode ?? "taxed") ||
+          payload.seller_quote_price !== campaign.seller_quote_price ||
+          payload.gonggu_price !== campaign.gonggu_price ||
+          JSON.stringify(payload.supply_price_tiers ?? []) !==
+            JSON.stringify(campaign.supply_price_tiers ?? []) ||
+          JSON.stringify(payload.seller_quote_tiers ?? []) !==
+            JSON.stringify(campaign.seller_quote_tiers ?? []);
+
+        if (pricingChanged) {
+          try {
+            const res = await fetch("/api/campaign-resync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ campaignId: campaign.id }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json.error);
+            if (json.warning) alert(json.warning);
+          } catch {
+            alert(
+              "가격 조건은 저장되었으나 입금 완료된 셀러의 재무 실적 재반영에 실패했습니다. 셀러 관리에서 입금 체크를 다시 눌러 동기화해주세요."
+            );
+          }
+        }
+
         router.push(`/campaigns/${campaign.id}`);
       }
 

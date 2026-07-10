@@ -3,7 +3,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import {
   formatDate,
-  isCampaignActive,
+  getCampaignStatus,
+  CAMPAIGN_STATUS_COLORS,
   formatWon,
   formatTwd,
   formatMoney,
@@ -96,7 +97,7 @@ export default async function CampaignDetailPage({
   );
 
   const records = (rawRecords ?? []) as CampaignInfluencerWithDetails[];
-  const active = isCampaignActive(campaign.start_date, campaign.end_date);
+  const campaignStatus = getCampaignStatus(campaign.start_date, campaign.end_date);
 
   const vendorFeeRate = campaign.vendor_fee_rate ?? 0;
   const influencerRsRate = campaign.influencer_rs_rate ?? 0;
@@ -233,8 +234,8 @@ export default async function CampaignDetailPage({
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <h1 className="text-lg font-bold text-gray-900">{campaign.campaign_name}</h1>
-              <span className={`badge ${active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                {active ? "진행중" : "종료"}
+              <span className={`badge ${CAMPAIGN_STATUS_COLORS[campaignStatus]}`}>
+                {campaignStatus}
               </span>
             </div>
             <p className="text-sm text-gray-500">{campaign.client_name}</p>

@@ -13,7 +13,8 @@ import {
   hasBankDetails,
 } from "@/types/database";
 import type { CrmKol } from "@/lib/supabase/crm";
-import { formatTwd, krwToTwd } from "@/lib/utils";
+import { formatTwd, formatWon, krwToTwd } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 const CONTENT_TYPE_OPTIONS = Object.entries(CONTENT_TYPE_LABEL) as [
   ContentType,
@@ -46,8 +47,12 @@ export default function InfluencerModal({
   campaignExchangeRate = null,
 }: InfluencerModalProps) {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 금액 입력 통화 — 환율이 있으면 NT$ 입력 지원 (저장은 항상 KRW).
+  // 판매금액·정산금액에 함께 적용된다.
+  const [amountCurrency, setAmountCurrency] = useState<"krw" | "twd">("krw");
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -214,6 +219,32 @@ export default function InfluencerModal({
     setFormData((prev) => ({ ...prev, influencer_id: "" }));
   };
 
+  // 입력값(현재 통화 기준) → KRW 환산
+  const toKrw = (value: string): number => {
+    const v = parseFloat(value) || 0;
+    return amountCurrency === "twd" && campaignExchangeRate
+      ? Math.round(v * campaignExchangeRate)
+      : v;
+  };
+
+  const switchAmountCurrency = (next: "krw" | "twd") => {
+    if (next === amountCurrency || !campaignExchangeRate) return;
+    // 입력 중인 금액을 새 통화로 환산해 유지
+    const convert = (s: string) => {
+      const v = parseFloat(s);
+      if (!(v > 0)) return s;
+      const converted =
+        next === "twd" ? v / campaignExchangeRate : v * campaignExchangeRate;
+      return String(Math.round(converted));
+    };
+    setFormData((prev) => ({
+      ...prev,
+      sales_amount: convert(prev.sales_amount),
+      settlement_amount: convert(prev.settlement_amount),
+    }));
+    setAmountCurrency(next);
+  };
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
@@ -322,10 +353,10 @@ export default function InfluencerModal({
         contents: validContents,
         content_url: validContents[0]?.url ?? null,
         is_uploaded: formData.is_uploaded,
-        sales_amount: parseFloat(formData.sales_amount) || 0,
+        sales_amount: toKrw(formData.sales_amount),
         quantity: parseInt(formData.quantity, 10) || 0,
         settlement_method: formData.settlement_method || null,
-        settlement_amount: parseFloat(formData.settlement_amount) || 0,
+        settlement_amount: toKrw(formData.settlement_amount),
         is_settled: formData.is_settled,
         settled_date: formData.settled_date || null,
         notes: formData.notes || null,
@@ -344,6 +375,9 @@ export default function InfluencerModal({
         if (error) throw error;
       }
 
+      toast.success(
+        record ? "인플루언서 정보가 수정되었습니다." : "인플루언서가 추가되었습니다."
+      );
       router.refresh();
       onClose();
     } catch (e: unknown) {
@@ -741,7 +775,30 @@ export default function InfluencerModal({
 
           {/* 판매 및 정산 */}
           <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-gray-700">판매 및 정산</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-700">판매 및 정산</h3>
+              {campaignExchangeRate ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-gray-400">입력 통화</span>
+                  <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden text-[11px]">
+                    {(["krw", "twd"] as const).map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => switchAmountCurrency(c)}
+                        className={`px-2.5 py-1 font-medium transition-colors ${
+                          amountCurrency === c
+                            ? "bg-primary-600 text-white"
+                            : "bg-white text-gray-500 hover:bg-gray-50"
+                        }`}
+                      >
+                        {c === "krw" ? "원" : "NT$"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
             {campaignInfluencerRsRate !== undefined && campaignInfluencerRsRate > 0 && (
               <p className="text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded-md">
                 캠페인 RS율 {campaignInfluencerRsRate}% 적용 — 판매액 입력 시 정산금액 자동계산
@@ -749,7 +806,9 @@ export default function InfluencerModal({
             )}
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="label">판매금액 (원)</label>
+                <label className="label">
+                  판매금액 ({amountCurrency === "twd" ? "NT$" : "원"})
+                </label>
                 <input
                   type="number"
                   name="sales_amount"
@@ -760,6 +819,12 @@ export default function InfluencerModal({
                   step="1"
                 />
                 {(() => {
+                  if (amountCurrency === "twd") {
+                    const krw = toKrw(formData.sales_amount);
+                    return krw > 0 ? (
+                      <p className="text-xs text-gray-400 mt-1">= {formatWon(krw)}</p>
+                    ) : null;
+                  }
                   const t = krwToTwd(
                     parseFloat(formData.sales_amount) || 0,
                     campaignExchangeRate
@@ -786,7 +851,7 @@ export default function InfluencerModal({
               </div>
               <div>
                 <label className="label flex items-center gap-2">
-                  정산금액 (원)
+                  정산금액 ({amountCurrency === "twd" ? "NT$" : "원"})
                   {isAutoCalc && (
                     <span className="text-xs font-normal bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
                       자동계산됨
@@ -803,6 +868,12 @@ export default function InfluencerModal({
                   step="1"
                 />
                 {(() => {
+                  if (amountCurrency === "twd") {
+                    const krw = toKrw(formData.settlement_amount);
+                    return krw > 0 ? (
+                      <p className="text-xs text-gray-400 mt-1">= {formatWon(krw)}</p>
+                    ) : null;
+                  }
                   const t = krwToTwd(
                     parseFloat(formData.settlement_amount) || 0,
                     campaignExchangeRate

@@ -1,11 +1,49 @@
 import { createClient } from "@/lib/supabase/server";
 import { createFinanceClient } from "@/lib/supabase/finance";
 import Link from "next/link";
-import { formatDate, formatCurrency, isCampaignActive } from "@/lib/utils";
+import {
+  formatDate,
+  formatWon,
+  getCampaignStatus,
+  CAMPAIGN_STATUS_COLORS,
+} from "@/lib/utils";
 import { getProgressStatus } from "@/types/database";
 
 // 재무 실적은 외부 프로젝트(tianxia-finance) DB에서 매번 읽어야 하므로 캐시하지 않는다.
 export const dynamic = "force-dynamic";
+
+/** 원화 축약 표기 — 차트 라벨용: 1.2억 / 3,400만 / 5,000원 */
+function formatWonCompact(n: number): string {
+  if (n >= 1e8) {
+    const v = n / 1e8;
+    return `${v >= 10 ? Math.round(v) : v.toFixed(1)}억`;
+  }
+  if (n >= 1e4) return `${Math.round(n / 1e4).toLocaleString("ko-KR")}만`;
+  return `${Math.round(n).toLocaleString("ko-KR")}원`;
+}
+
+interface MonthlySale {
+  year: number;
+  month: number;
+  total: number;
+}
+
+/** 최근 12개월(이번 달 포함) 버킷 — 데이터 없는 달은 0 */
+function buildMonthlyBuckets(
+  rows: { year: number; month: number; amount: number }[]
+): MonthlySale[] {
+  const now = new Date();
+  const buckets: MonthlySale[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    buckets.push({ year: d.getFullYear(), month: d.getMonth() + 1, total: 0 });
+  }
+  for (const r of rows) {
+    const b = buckets.find((x) => x.year === r.year && x.month === r.month);
+    if (b) b.total += r.amount || 0;
+  }
+  return buckets;
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -32,9 +70,10 @@ export default async function DashboardPage() {
   // gonggu_sales 전체를 실시간으로 읽고 없을 때만 사본으로 폴백한다.
   let totalConfirmedSales = 0;
   let confirmedSub = "재무관리 시스템 확정 기준 누적";
+  let monthlyRows: { year: number; month: number; amount: number }[] = [];
   const finance = createFinanceClient();
   const { data: gongguSales } = finance
-    ? await finance.from("gonggu_sales").select("gross_sales")
+    ? await finance.from("gonggu_sales").select("year, month, gross_sales")
     : { data: null };
   if (gongguSales) {
     totalConfirmedSales = gongguSales.reduce(
@@ -42,30 +81,55 @@ export default async function DashboardPage() {
       0
     );
     confirmedSub = "재무 공구 사업부 실적 누적 (셀러 입금 포함)";
+    monthlyRows = gongguSales.map((r) => ({
+      year: r.year,
+      month: r.month,
+      amount: r.gross_sales || 0,
+    }));
   } else {
     const { data: financeRows } = await supabase
       .from("campaign_finance")
-      .select("confirmed_sales");
+      .select("year, month, confirmed_sales");
     totalConfirmedSales = (financeRows ?? []).reduce(
       (sum, r) => sum + (r.confirmed_sales || 0),
       0
     );
+    monthlyRows = (financeRows ?? []).map((r) => ({
+      year: r.year,
+      month: r.month,
+      amount: r.confirmed_sales || 0,
+    }));
   }
 
-  const totalCampaigns = campaigns?.length ?? 0;
-  const activeCampaigns =
-    campaigns?.filter((c) => isCampaignActive(c.start_date, c.end_date))
-      .length ?? 0;
-  const endedCampaigns = totalCampaigns - activeCampaigns;
+  const monthly = buildMonthlyBuckets(monthlyRows);
+  const monthlyMax = Math.max(...monthly.map((m) => m.total));
+  const hasMonthlyData = monthlyMax > 0;
+  const maxIndex = monthly.findIndex((m) => m.total === monthlyMax);
 
+  const totalCampaigns = campaigns?.length ?? 0;
+  const statusCounts = { 예정: 0, 진행중: 0, 종료: 0 };
+  for (const c of campaigns ?? []) {
+    statusCounts[getCampaignStatus(c.start_date, c.end_date)]++;
+  }
+
+  // 정산 대기 금액 — 정산금액 미입력 건은 캠페인 RS율로 추정해 합산 (과소 표시 방지)
+  const rsRateMap = new Map<string, number>(
+    (campaigns ?? []).map((c) => [c.id, c.influencer_rs_rate ?? 0])
+  );
   const pendingList =
     campaignInfluencers?.filter((ci) => getProgressStatus(ci) === "정산대기") ??
     [];
   const pendingSettlement = pendingList.length;
-  const pendingSettlementAmount = pendingList.reduce(
-    (sum, ci) => sum + (ci.settlement_amount || 0),
-    0
-  );
+  let pendingHasEstimate = false;
+  const pendingSettlementAmount = pendingList.reduce((sum, ci) => {
+    if (ci.settlement_amount > 0) return sum + ci.settlement_amount;
+    const rate = rsRateMap.get(ci.campaign_id) ?? 0;
+    if (ci.sales_amount > 0 && rate > 0) {
+      pendingHasEstimate = true;
+      return sum + Math.round(ci.sales_amount * (rate / 100));
+    }
+    return sum;
+  }, 0);
 
   const completedSettlement =
     campaignInfluencers?.filter((ci) => ci.is_settled).length ?? 0;
@@ -79,30 +143,27 @@ export default async function DashboardPage() {
 
   const recentCampaigns = campaigns?.slice(0, 5) ?? [];
 
-  const fmtWon = (n: number) =>
-    `${Math.round(n).toLocaleString("ko-KR")}원`;
-
   const moneyStats = [
     {
       label: "확정 취급액",
-      value: fmtWon(totalConfirmedSales),
+      value: formatWon(totalConfirmedSales),
       sub: confirmedSub,
       color: "bg-purple-50 text-purple-600",
       href: "/campaigns",
     },
     {
       label: "정산 대기 금액",
-      value: fmtWon(pendingSettlementAmount),
-      sub: `${pendingSettlement}건 — KOL 지급 예정 (캠페인별 관리)`,
+      value: formatWon(pendingSettlementAmount),
+      sub: `${pendingSettlement}건 — KOL 지급 예정${pendingHasEstimate ? " (미입력 건 RS율 추정 포함)" : ""}`,
       color: "bg-orange-50 text-orange-600",
-      href: "/campaigns",
+      href: "/settlements",
     },
     {
       label: "KOL 지급 완료",
-      value: fmtWon(totalKolPaid),
+      value: formatWon(totalKolPaid),
       sub: `${completedSettlement}건 정산 완료`,
       color: "bg-green-50 text-green-600",
-      href: "/campaigns",
+      href: "/settlements?tab=done",
     },
   ];
 
@@ -110,7 +171,7 @@ export default async function DashboardPage() {
     {
       label: "전체 캠페인",
       value: totalCampaigns,
-      sub: `진행중 ${activeCampaigns} · 종료 ${endedCampaigns}`,
+      sub: `진행중 ${statusCounts.진행중} · 예정 ${statusCounts.예정} · 종료 ${statusCounts.종료}`,
       color: "bg-blue-50 text-blue-600",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -192,6 +253,66 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      {/* 월별 확정 취급액 추이 — 재무 실적 기준 최근 12개월 */}
+      {hasMonthlyData && (
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-900">
+              월별 확정 취급액
+              <span className="ml-2 text-xs font-normal text-gray-400">
+                최근 12개월 · 재무 확정 기준
+              </span>
+            </h2>
+          </div>
+          <div className="flex items-end gap-1.5 h-40">
+            {monthly.map((m, i) => {
+              const heightPct =
+                monthlyMax > 0 ? Math.max(m.total > 0 ? 3 : 0, (m.total / monthlyMax) * 100) : 0;
+              const isLast = i === monthly.length - 1;
+              const showLabel = m.total > 0 && (i === maxIndex || isLast);
+              return (
+                <div
+                  key={`${m.year}-${m.month}`}
+                  className="group relative flex-1 flex flex-col items-center justify-end h-full"
+                >
+                  {/* 호버 툴팁 */}
+                  {m.total > 0 && (
+                    <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg px-2.5 py-1.5 whitespace-nowrap z-10 pointer-events-none">
+                      {m.year}년 {m.month}월 · {formatWon(m.total)}
+                    </div>
+                  )}
+                  {/* 상시 라벨은 최대·최신 달만 (선택적 직접 라벨) */}
+                  {showLabel && (
+                    <p className="text-[10px] font-semibold text-gray-600 mb-1 whitespace-nowrap">
+                      {formatWonCompact(m.total)}
+                    </p>
+                  )}
+                  <div
+                    className={`w-full max-w-[36px] rounded-t transition-colors ${
+                      m.total > 0
+                        ? "bg-purple-400 group-hover:bg-purple-500"
+                        : "bg-gray-100"
+                    }`}
+                    style={{ height: `${heightPct}%`, minHeight: m.total > 0 ? undefined : "2px" }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {/* 월 라벨 */}
+          <div className="flex gap-1.5 mt-2 border-t border-gray-100 pt-1.5">
+            {monthly.map((m, i) => (
+              <p
+                key={`${m.year}-${m.month}`}
+                className="flex-1 text-center text-[10px] text-gray-400 whitespace-nowrap"
+              >
+                {m.month === 1 || i === 0 ? `${String(m.year).slice(2)}.${m.month}` : `${m.month}월`}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 최근 캠페인 */}
       <div className="card">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -225,7 +346,7 @@ export default async function DashboardPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {recentCampaigns.map((campaign) => {
-                  const active = isCampaignActive(
+                  const status = getCampaignStatus(
                     campaign.start_date,
                     campaign.end_date
                   );
@@ -248,14 +369,8 @@ export default async function DashboardPage() {
                           : "-"}
                       </td>
                       <td className="table-cell">
-                        <span
-                          className={`badge ${
-                            active
-                              ? "bg-green-100 text-green-700"
-                              : "bg-gray-100 text-gray-600"
-                          }`}
-                        >
-                          {active ? "진행중" : "종료"}
+                        <span className={`badge ${CAMPAIGN_STATUS_COLORS[status]}`}>
+                          {status}
                         </span>
                       </td>
                       <td className="table-cell text-gray-500 text-xs">

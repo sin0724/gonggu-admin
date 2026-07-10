@@ -23,9 +23,18 @@ const navItems = [
       </svg>
     ),
   },
-  // 인플루언서·정산 관리는 사이드바에서 제거 —
-  // KOL은 tianxia-crm KOL DB에서 검색해 캠페인별로 추가하고,
-  // 정산도 캠페인 상세(인플루언서·셀러 테이블)에서 캠페인별로 관리한다.
+  // 인플루언서 관리는 사이드바에서 제거 —
+  // KOL은 tianxia-crm KOL DB에서 검색해 캠페인별로 추가한다.
+  // 정산 관리는 전 캠페인 송금 큐 — 캠페인별 데이터와 동일 소스.
+  {
+    href: "/settlements",
+    label: "정산 관리",
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    ),
+  },
   {
     href: "/prospects",
     label: "가망건 관리",

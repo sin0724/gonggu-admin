@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -12,6 +12,8 @@ import {
 } from "@/types/database";
 import { formatDate, formatWon, formatTwd, krwToTwd } from "@/lib/utils";
 import InfluencerModal from "./influencer-modal";
+import { useToast } from "@/components/ui/toast";
+import ConfirmDialog from "@/components/ui/confirm-dialog";
 
 interface InfluencerTableProps {
   campaignId: string;
@@ -63,16 +65,31 @@ export default function InfluencerTable({
   campaignExchangeRate = null,
 }: InfluencerTableProps) {
   const router = useRouter();
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProgressStatus | "전체">("전체");
   const [showModal, setShowModal] = useState(false);
   const [editRecord, setEditRecord] = useState<
     CampaignInfluencerWithDetails | undefined
   >(undefined);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] =
+    useState<CampaignInfluencerWithDetails | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // 낙관적 오버라이드 — 체크박스 토글 즉시 반영, 실패 시 롤백
+  const [overrides, setOverrides] = useState<
+    Record<string, Partial<CampaignInfluencerWithDetails>>
+  >({});
 
-  const filtered = records.filter((r) => {
+  const effectiveRecords = useMemo(
+    () =>
+      records.map((r) => {
+        const o = overrides[r.id];
+        return o ? { ...r, ...o } : r;
+      }),
+    [records, overrides]
+  );
+
+  const filtered = effectiveRecords.filter((r) => {
     const matchName = r.influencer.name
       .toLowerCase()
       .includes(search.toLowerCase());
@@ -83,76 +100,74 @@ export default function InfluencerTable({
 
   // 각 탭별 건수
   const statusCounts: Record<ProgressStatus | "전체", number> = {
-    전체: records.length,
+    전체: effectiveRecords.length,
     발송대기: 0,
     업로드대기: 0,
     판매중: 0,
     정산대기: 0,
     정산완료: 0,
   };
-  records.forEach((r) => {
+  effectiveRecords.forEach((r) => {
     const s = getProgressStatus(r);
     statusCounts[s]++;
   });
 
-  const totalSales = records.reduce((sum, r) => sum + (r.sales_amount || 0), 0);
-  const totalSettlement = records.reduce(
-    (sum, r) => sum + (r.settlement_amount || 0),
-    0
-  );
-
-  const handleDelete = async (id: string, name: string) => {
-    if (
-      !confirm(`"${name}" 인플루언서를 이 캠페인에서 제거하시겠습니까?`)
-    )
-      return;
-
-    setDeletingId(id);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
       const supabase = createClient();
       const { error } = await supabase
         .from("campaign_influencers")
         .delete()
-        .eq("id", id);
+        .eq("id", deleteTarget.id);
       if (error) throw error;
+      toast.success(`${deleteTarget.influencer.name} 님을 캠페인에서 제거했습니다.`);
+      setDeleteTarget(null);
       router.refresh();
     } catch {
-      alert("삭제 중 오류가 발생했습니다.");
+      toast.error("삭제 중 오류가 발생했습니다.");
     } finally {
-      setDeletingId(null);
+      setDeleting(false);
     }
   };
 
+  // 낙관적 토글 — 클릭 즉시 UI 반영, DB 실패 시 롤백 + 에러 토스트
   const handleToggleCheckbox = async (
     record: CampaignInfluencerWithDetails,
     field: CheckboxField
   ) => {
     const currentValue = record[field];
-    setTogglingId(record.id + field);
-    try {
-      const supabase = createClient();
-      const today = new Date().toISOString().slice(0, 10);
-      const payload: Record<string, boolean | string | null> = {
-        [field]: !currentValue,
-      };
-      // 체크 시 날짜 자동 기록, 해제 시 날짜 제거
-      if (field === "is_product_sent") {
-        payload.sent_date = !currentValue ? record.sent_date || today : null;
-      }
-      if (field === "is_settled") {
-        payload.settled_date = !currentValue ? record.settled_date || today : null;
-      }
-      const { error } = await supabase
-        .from("campaign_influencers")
-        .update(payload)
-        .eq("id", record.id);
-      if (error) throw error;
-      router.refresh();
-    } catch {
-      alert("업데이트 중 오류가 발생했습니다.");
-    } finally {
-      setTogglingId(null);
+    const today = new Date().toISOString().slice(0, 10);
+    const payload: Record<string, boolean | string | null> = {
+      [field]: !currentValue,
+    };
+    // 체크 시 날짜 자동 기록, 해제 시 날짜 제거
+    if (field === "is_product_sent") {
+      payload.sent_date = !currentValue ? record.sent_date || today : null;
     }
+    if (field === "is_settled") {
+      payload.settled_date = !currentValue ? record.settled_date || today : null;
+    }
+
+    const prev: Partial<CampaignInfluencerWithDetails> = {
+      [field]: currentValue,
+      sent_date: record.sent_date,
+      settled_date: record.settled_date,
+    };
+    setOverrides((o) => ({ ...o, [record.id]: { ...o[record.id], ...payload } }));
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("campaign_influencers")
+      .update(payload)
+      .eq("id", record.id);
+    if (error) {
+      setOverrides((o) => ({ ...o, [record.id]: { ...o[record.id], ...prev } }));
+      toast.error("업데이트에 실패했습니다. 다시 시도해주세요.");
+      return;
+    }
+    router.refresh();
   };
 
   const handleEdit = (record: CampaignInfluencerWithDetails) => {
@@ -456,11 +471,10 @@ export default function InfluencerTable({
                           <input
                             type="checkbox"
                             checked={r.is_product_sent}
-                            disabled={togglingId === r.id + "is_product_sent"}
                             onChange={() =>
                               handleToggleCheckbox(r, "is_product_sent")
                             }
-                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
                           />
                         </td>
                         {/* 인라인 체크박스 - 업로드여부 */}
@@ -468,11 +482,10 @@ export default function InfluencerTable({
                           <input
                             type="checkbox"
                             checked={r.is_uploaded}
-                            disabled={togglingId === r.id + "is_uploaded"}
                             onChange={() =>
                               handleToggleCheckbox(r, "is_uploaded")
                             }
-                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
                           />
                         </td>
                         {/* 인라인 체크박스 - 정산여부 */}
@@ -480,11 +493,10 @@ export default function InfluencerTable({
                           <input
                             type="checkbox"
                             checked={r.is_settled}
-                            disabled={togglingId === r.id + "is_settled"}
                             onChange={() =>
                               handleToggleCheckbox(r, "is_settled")
                             }
-                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
                           />
                         </td>
                         <td className="table-cell text-gray-500 text-xs max-w-[120px] truncate hidden md:table-cell">
@@ -499,10 +511,7 @@ export default function InfluencerTable({
                               수정
                             </button>
                             <button
-                              onClick={() =>
-                                handleDelete(r.id, r.influencer.name)
-                              }
-                              disabled={deletingId === r.id}
+                              onClick={() => setDeleteTarget(r)}
                               className="btn btn-sm bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
                             >
                               삭제
@@ -537,6 +546,22 @@ export default function InfluencerTable({
           campaignExchangeRate={campaignExchangeRate}
         />
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="인플루언서 제거"
+        danger
+        description={
+          <>
+            <b className="text-gray-800">{deleteTarget?.influencer.name}</b> 님을 이
+            캠페인에서 제거합니다. 판매·정산 기록도 함께 삭제됩니다.
+          </>
+        }
+        confirmLabel="제거"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </>
   );
 }

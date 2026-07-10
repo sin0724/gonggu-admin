@@ -242,7 +242,12 @@ export type ProgressStatus =
   | "정산대기"
   | "정산완료";
 
-export function getProgressStatus(ci: CampaignInfluencer): ProgressStatus {
+export function getProgressStatus(
+  ci: Pick<
+    CampaignInfluencer,
+    "is_product_sent" | "is_uploaded" | "is_settled" | "sales_amount"
+  >
+): ProgressStatus {
   if (!ci.is_product_sent) return "발송대기";
   if (ci.is_product_sent && !ci.is_uploaded) return "업로드대기";
   if (ci.is_settled) return "정산완료";

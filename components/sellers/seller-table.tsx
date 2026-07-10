@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { CampaignSeller, PriceTier } from "@/types/database";
 import { formatWon, formatTwd, krwToTwd } from "@/lib/utils";
 import { resolveTierPrice } from "@/lib/economics";
+import { useToast } from "@/components/ui/toast";
+import ConfirmDialog from "@/components/ui/confirm-dialog";
 
 // 캠페인별 셀러 관리 — 대만 총판/개별 셀러/공동구매 업체를 "셀러"로 통일.
 // 셀러가 우리에게 견적 단가(수출 영세율 0%)로 구매해가서 판매하는 채널.
@@ -59,11 +61,14 @@ export default function SellerTable({
   exchangeRate,
 }: SellerTableProps) {
   const router = useRouter();
+  const toast = useToast();
   const [showModal, setShowModal] = useState(false);
   const [editRecord, setEditRecord] = useState<CampaignSeller | undefined>();
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CampaignSeller | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 견적 단가 입력 통화 — 환율이 있으면 NT$ 입력도 지원 (저장은 항상 KRW)
+  const [quoteCurrency, setQuoteCurrency] = useState<"krw" | "twd">("krw");
   const [form, setForm] = useState({
     name: "",
     contact: "",
@@ -72,29 +77,65 @@ export default function SellerTable({
     is_paid: false,
     notes: "",
   });
+  // 낙관적 오버라이드 — 입금 토글 즉시 반영, 실패 시 롤백
+  const [paidOverrides, setPaidOverrides] = useState<
+    Record<string, { is_paid: boolean }>
+  >({});
+
+  const effectiveSellers = useMemo(
+    () =>
+      sellers.map((s) => {
+        const o = paidOverrides[s.id];
+        return o ? { ...s, ...o } : s;
+      }),
+    [sellers, paidOverrides]
+  );
 
   // 셀러별 적용 견적 단가 — 개별 단가 우선, 없으면 캠페인 구간 단가를 수량에 맞춰 자동 적용
   const effQuoteFor = (s: CampaignSeller) =>
     s.quote_price ??
     resolveTierPrice(campaignQuotePrice, quoteTiers, s.quantity || 0);
 
-  const totalQty = sellers.reduce((sum, s) => sum + (s.quantity || 0), 0);
-  const totalRevenue = sellers.reduce(
+  const totalQty = effectiveSellers.reduce((sum, s) => sum + (s.quantity || 0), 0);
+  const totalRevenue = effectiveSellers.reduce(
     (sum, s) => sum + (s.quantity || 0) * effQuoteFor(s),
     0
   );
   const totalMargin =
     effectiveSupplyCost > 0
-      ? sellers.reduce(
+      ? effectiveSellers.reduce(
           (sum, s) =>
             sum + (s.quantity || 0) * (effQuoteFor(s) - effectiveSupplyCost),
           0
         )
       : 0;
-  const unpaidCount = sellers.filter((s) => !s.is_paid).length;
+  const unpaidCount = effectiveSellers.filter((s) => !s.is_paid).length;
+
+  // 폼의 견적 단가를 KRW로 환산 (twd 모드면 환율 곱)
+  const formQuoteKrw = (): number | null => {
+    if (!form.quote_price) return null;
+    const v = parseFloat(form.quote_price);
+    if (!v && v !== 0) return null;
+    return Math.round(
+      quoteCurrency === "twd" && exchangeRate ? v * exchangeRate : v
+    );
+  };
+
+  const switchQuoteCurrency = (next: "krw" | "twd") => {
+    if (next === quoteCurrency || !exchangeRate) return;
+    // 입력 중인 값을 새 통화로 환산해 유지
+    const v = parseFloat(form.quote_price);
+    if (v > 0) {
+      const converted =
+        next === "twd" ? v / exchangeRate : v * exchangeRate;
+      setForm((f) => ({ ...f, quote_price: String(Math.round(converted)) }));
+    }
+    setQuoteCurrency(next);
+  };
 
   const openAdd = () => {
     setEditRecord(undefined);
+    setQuoteCurrency("krw");
     setForm({
       name: "",
       contact: "",
@@ -108,6 +149,7 @@ export default function SellerTable({
 
   const openEdit = (s: CampaignSeller) => {
     setEditRecord(s);
+    setQuoteCurrency("krw");
     setForm({
       name: s.name,
       contact: s.contact ?? "",
@@ -128,7 +170,7 @@ export default function SellerTable({
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error ?? "입금 처리 실패");
-    if (json.warning) alert(json.warning);
+    if (json.warning) toast.info(json.warning);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -142,7 +184,7 @@ export default function SellerTable({
         name: form.name.trim(),
         contact: form.contact.trim() || null,
         quantity: parseInt(form.quantity, 10) || 0,
-        quote_price: form.quote_price ? Math.round(parseFloat(form.quote_price)) : null,
+        quote_price: formQuoteKrw(),
         notes: form.notes.trim() || null,
       };
       let sellerId = editRecord?.id;
@@ -167,42 +209,47 @@ export default function SellerTable({
       if (sellerId && (form.is_paid !== wasPaid || form.is_paid)) {
         await syncPaid(sellerId, form.is_paid);
       }
+      toast.success(editRecord ? "셀러 정보가 수정되었습니다." : "셀러가 추가되었습니다.");
       setShowModal(false);
       router.refresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "저장 중 오류가 발생했습니다.");
+      toast.error(err instanceof Error ? err.message : "저장 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (s: CampaignSeller) => {
-    if (!confirm(`"${s.name}" 셀러를 이 캠페인에서 제거하시겠습니까?`)) return;
-    setDeletingId(s.id);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
       const supabase = createClient();
       const { error } = await supabase
         .from("campaign_sellers")
         .delete()
-        .eq("id", s.id);
+        .eq("id", deleteTarget.id);
       if (error) throw error;
+      toast.success(`"${deleteTarget.name}" 셀러를 제거했습니다.`);
+      setDeleteTarget(null);
       router.refresh();
     } catch {
-      alert("삭제 중 오류가 발생했습니다.");
+      toast.error("삭제 중 오류가 발생했습니다.");
     } finally {
-      setDeletingId(null);
+      setDeleting(false);
     }
   };
 
+  // 낙관적 입금 토글 — 즉시 반영, 재무 연동 실패 시 롤백
   const handleTogglePaid = async (s: CampaignSeller) => {
-    setTogglingId(s.id);
+    const next = !s.is_paid;
+    setPaidOverrides((o) => ({ ...o, [s.id]: { is_paid: next } }));
     try {
-      await syncPaid(s.id, !s.is_paid);
+      await syncPaid(s.id, next);
+      if (next) toast.success("입금 완료 — 재무 실적에 반영되었습니다.");
       router.refresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "업데이트 중 오류가 발생했습니다.");
-    } finally {
-      setTogglingId(null);
+      setPaidOverrides((o) => ({ ...o, [s.id]: { is_paid: s.is_paid } }));
+      toast.error(err instanceof Error ? err.message : "업데이트 중 오류가 발생했습니다.");
     }
   };
 
@@ -242,7 +289,7 @@ export default function SellerTable({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sellers.length === 0 ? (
+              {effectiveSellers.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-gray-400 text-sm">
                     등록된 셀러가 없습니다. 총판·개별 셀러·공동구매 업체 모두
@@ -250,7 +297,7 @@ export default function SellerTable({
                   </td>
                 </tr>
               ) : (
-                sellers.map((s) => {
+                effectiveSellers.map((s) => {
                   const quote = effQuoteFor(s);
                   const revenue = (s.quantity || 0) * quote;
                   const margin =
@@ -308,9 +355,8 @@ export default function SellerTable({
                         <input
                           type="checkbox"
                           checked={s.is_paid}
-                          disabled={togglingId === s.id}
                           onChange={() => handleTogglePaid(s)}
-                          className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50"
+                          className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
                         />
                         {s.is_paid && s.paid_date && (
                           <p className="text-[10px] text-gray-400 mt-0.5">
@@ -330,8 +376,7 @@ export default function SellerTable({
                             수정
                           </button>
                           <button
-                            onClick={() => handleDelete(s)}
-                            disabled={deletingId === s.id}
+                            onClick={() => setDeleteTarget(s)}
                             className="btn btn-sm bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
                           >
                             삭제
@@ -343,11 +388,11 @@ export default function SellerTable({
                 })
               )}
             </tbody>
-            {sellers.length > 0 && (
+            {effectiveSellers.length > 0 && (
               <tfoot className="bg-gray-50 border-t border-gray-200 text-sm font-medium">
                 <tr>
                   <td className="table-cell text-gray-500">
-                    합계 {sellers.length}개 셀러
+                    합계 {effectiveSellers.length}개 셀러
                     {unpaidCount > 0 && (
                       <span className="ml-1.5 text-xs text-orange-500">
                         미입금 {unpaidCount}
@@ -426,7 +471,29 @@ export default function SellerTable({
                 />
               </div>
               <div>
-                <label className="label">견적 단가 (원 · 영세율 0%)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label mb-0">
+                    견적 단가 ({quoteCurrency === "twd" ? "NT$" : "원"} · 영세율 0%)
+                  </label>
+                  {exchangeRate ? (
+                    <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden text-[11px]">
+                      {(["krw", "twd"] as const).map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => switchQuoteCurrency(c)}
+                          className={`px-2 py-0.5 font-medium transition-colors ${
+                            quoteCurrency === c
+                              ? "bg-primary-600 text-white"
+                              : "bg-white text-gray-500 hover:bg-gray-50"
+                          }`}
+                        >
+                          {c === "krw" ? "원" : "NT$"}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 <input
                   type="number"
                   value={form.quote_price}
@@ -440,12 +507,22 @@ export default function SellerTable({
                       quoteTiers,
                       parseInt(form.quantity, 10) || 0
                     );
-                    return auto > 0 ? `자동: ${fmt(auto)}원` : "개당 단가";
+                    if (auto <= 0) return "개당 단가";
+                    if (quoteCurrency === "twd" && exchangeRate) {
+                      return `자동: NT$${fmt(auto / exchangeRate)}`;
+                    }
+                    return `자동: ${fmt(auto)}원`;
                   })()}
                   min="0"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  비워두면 캠페인 구간 단가를 수량에 맞춰 자동 적용
+                  {(() => {
+                    const krw = formQuoteKrw();
+                    if (quoteCurrency === "twd" && krw !== null && krw > 0) {
+                      return `= ${fmt(krw)}원으로 저장됩니다 (환율 ${fmt(exchangeRate ?? 0)}원/NT$)`;
+                    }
+                    return "비워두면 캠페인 구간 단가를 수량에 맞춰 자동 적용";
+                  })()}
                 </p>
               </div>
             </div>
@@ -486,6 +563,24 @@ export default function SellerTable({
           </form>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="셀러 제거"
+        danger
+        description={
+          <>
+            <b className="text-gray-800">&quot;{deleteTarget?.name}&quot;</b> 셀러를 이
+            캠페인에서 제거합니다.
+            {deleteTarget?.is_paid &&
+              " 입금 완료 건이므로 재무 실적 기록은 남습니다 — 필요하면 먼저 입금 체크를 해제하세요."}
+          </>
+        }
+        confirmLabel="제거"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

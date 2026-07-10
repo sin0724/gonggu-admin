@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Campaign, CampaignInsert, PriceTier } from "@/types/database";
 import { krwToTwd, formatTwd } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 import {
   computeUnitEconomics,
   judgeFeasibility,
@@ -163,6 +164,7 @@ function PriceCaption({
 
 export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [targetMargin, setTargetMargin] = useState(2000);
@@ -542,7 +544,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             );
             const failed = results.filter((r) => r.error).length;
             if (failed > 0) {
-              alert(
+              toast.error(
                 `RS율 변경에 따른 정산금액 재계산 중 ${failed}건이 실패했습니다. 해당 인플루언서의 정산금액을 직접 확인해주세요.`
               );
             }
@@ -570,9 +572,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             });
             const json = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(json.error);
-            if (json.warning) alert(json.warning);
+            if (json.warning) toast.info(json.warning);
           } catch {
-            alert(
+            toast.error(
               "가격 조건은 저장되었으나 입금 완료된 셀러의 재무 실적 재반영에 실패했습니다. 셀러 관리에서 입금 체크를 다시 눌러 동기화해주세요."
             );
           }
@@ -581,6 +583,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         router.push(`/campaigns/${campaign.id}`);
       }
 
+      toast.success(
+        mode === "create" ? "캠페인이 등록되었습니다." : "캠페인이 수정되었습니다."
+      );
       router.refresh();
     } catch {
       setError("저장 중 오류가 발생했습니다. 다시 시도해주세요.");

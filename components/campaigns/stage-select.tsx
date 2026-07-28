@@ -45,6 +45,15 @@ export default function StageSelect({
         .update({ status: next })
         .eq("id", campaignId);
       if (error) throw error;
+
+      // 단계가 종료·보류로 가면 캘린더에서 내려가고, 되살아나면 다시 올라간다.
+      // 실패해도 단계 변경 자체는 끝났으므로 조용히 넘어간다.
+      fetch("/api/calendar/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId }),
+      }).catch(() => {});
+
       toast.success(`단계를 "${STAGE_LABEL[next]}"(으)로 변경했습니다.`);
       router.refresh();
     } catch {

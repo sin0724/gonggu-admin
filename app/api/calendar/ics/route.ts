@@ -1,7 +1,10 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { buildIcs, CalendarEvent } from "@/lib/calendar";
-import { STAGE_LABEL, resolveStage } from "@/lib/campaign-stage";
-import { SCHEDULE_KIND_LABEL, ScheduleKind } from "@/types/database";
+import { buildIcs } from "@/lib/calendar";
+import {
+  buildSyncEvents,
+  CampaignRow,
+  ScheduleRow,
+} from "@/lib/calendar-events";
 
 // 구글 캘린더 구독 피드.
 // 구글 서버가 로그인 없이 주기적으로 당겨가므로 세션 대신 토큰으로 보호하고,
@@ -14,28 +17,6 @@ import { SCHEDULE_KIND_LABEL, ScheduleKind } from "@/types/database";
 // 일정 카드의 "구글 캘린더에 추가" 링크를 쓰면 된다.
 
 export const dynamic = "force-dynamic";
-
-interface ScheduleRow {
-  id: string;
-  campaign_id: string;
-  title: string;
-  kind: ScheduleKind;
-  all_day: boolean;
-  start_at: string;
-  end_at: string | null;
-  location: string | null;
-  notes: string | null;
-  updated_at: string;
-}
-
-interface CampaignRow {
-  id: string;
-  campaign_name: string;
-  client_name: string;
-  status: string | null;
-  start_date: string | null;
-  end_date: string | null;
-}
 
 /**
  * Supabase 키의 role 클레임을 읽는다 — anon 키를 SUPABASE_SERVICE_ROLE_KEY에
@@ -72,14 +53,6 @@ function resolveOrigin(request: Request): string {
     return `${proto}://${host}`;
   }
   return new URL(request.url).origin;
-}
-
-/** timestamptz → 종일 이벤트용 YYYY-MM-DD (한국 시간 기준) */
-function toSeoulDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  const seoul = new Date(d.getTime() + 9 * 3600_000);
-  return seoul.toISOString().slice(0, 10);
 }
 
 export async function GET(request: Request) {
@@ -124,64 +97,17 @@ export async function GET(request: Request) {
       .select("id, campaign_name, client_name, status, start_date, end_date"),
   ]);
 
-  const campaignById = new Map<string, CampaignRow>(
-    ((campaigns ?? []) as CampaignRow[]).map((c) => [c.id, c])
-  );
-
   // 배포 주소 — 일정 설명에 캠페인 상세 링크를 넣어준다.
   // request.url은 Railway 내부 프록시 주소(localhost:8080)라 그대로 쓰면 안 되고,
   // 프록시가 붙여주는 x-forwarded-* 를 먼저 본다.
   const origin = resolveOrigin(request);
 
-  const events: CalendarEvent[] = [];
-
-  for (const s of (schedules ?? []) as ScheduleRow[]) {
-    const campaign = campaignById.get(s.campaign_id);
-    const campaignLabel = campaign
-      ? `${campaign.client_name} · ${campaign.campaign_name}`
-      : "";
-    const detailUrl = campaign ? `${origin}/campaigns/${campaign.id}` : null;
-
-    events.push({
-      uid: `schedule-${s.id}`,
-      // 캘린더에서는 어느 캠페인 일정인지가 먼저 보여야 한다
-      title: campaignLabel
-        ? `[${campaignLabel}] ${s.title}`
-        : s.title,
-      description: [
-        `유형: ${SCHEDULE_KIND_LABEL[s.kind] ?? "기타"}`,
-        s.notes,
-        detailUrl,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      location: s.location,
-      allDay: s.all_day,
-      start: s.all_day ? toSeoulDate(s.start_at) : s.start_at,
-      end: s.end_at ? (s.all_day ? toSeoulDate(s.end_at) : s.end_at) : null,
-      url: detailUrl,
-      updatedAt: s.updated_at,
-    });
-  }
-
-  // 캠페인 공구 기간 자체도 종일 이벤트 한 건으로 내보낸다 (종료·보류 제외)
-  for (const c of (campaigns ?? []) as CampaignRow[]) {
-    const stage = resolveStage(c);
-    if (stage === "done" || stage === "dropped") continue;
-    if (!c.start_date && !c.end_date) continue;
-    const start = c.start_date ?? c.end_date!;
-    events.push({
-      uid: `campaign-${c.id}`,
-      title: `🛒 ${c.client_name} · ${c.campaign_name} 공구기간`,
-      description: [`단계: ${STAGE_LABEL[stage]}`, `${origin}/campaigns/${c.id}`].join(
-        "\n"
-      ),
-      allDay: true,
-      start,
-      end: c.end_date ?? start,
-      url: `${origin}/campaigns/${c.id}`,
-    });
-  }
+  // 이벤트 구성은 구글 API 동기화와 공유한다 (lib/calendar-events.ts)
+  const events = buildSyncEvents(
+    (campaigns ?? []) as CampaignRow[],
+    (schedules ?? []) as ScheduleRow[],
+    origin
+  );
 
   // ?debug=1 — 구글에 일정이 안 뜰 때 어디서 끊겼는지 보는 진단용.
   // 키 role이 service_role이 아니면 RLS에 막혀 0건이 나가므로 그것부터 확인한다.

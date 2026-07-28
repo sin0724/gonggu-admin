@@ -26,6 +26,7 @@ import ScheduleModal, {
   CalendarCampaignOption,
 } from "@/components/calendar/schedule-modal";
 import FeedSubscribe from "@/components/calendar/feed-subscribe";
+import SyncButton from "@/components/calendar/sync-button";
 
 export interface CalendarCampaign extends CalendarCampaignOption {
   stage: CampaignStage;
@@ -229,6 +230,7 @@ export default function CampaignCalendar({
               </option>
             ))}
           </select>
+          <SyncButton />
           <FeedSubscribe feedUrl={feedUrl} />
           <button
             onClick={() => setModal({ mode: "create", date: today })}

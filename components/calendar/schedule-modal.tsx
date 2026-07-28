@@ -85,6 +85,28 @@ export default function ScheduleModal({
 
   const campaign = campaigns.find((c) => c.id === form.campaign_id);
 
+  /**
+   * 팀 구글 캘린더에 반영 — DB 저장이 끝난 뒤 부른다.
+   * 연동 미설정(503)이면 조용히 넘어가고, 실패해도 DB 저장은 이미 끝났으므로
+   * 저장 자체를 막지 않고 경고만 띄운다.
+   */
+  const syncToGoogle = async (payload: Record<string, unknown>) => {
+    try {
+      const res = await fetch("/api/calendar/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok || res.status === 503) return;
+      const body = await res.json().catch(() => ({}));
+      toast.error(
+        `구글 캘린더 반영 실패: ${body.error ?? res.status}. 저장은 완료됐습니다.`
+      );
+    } catch {
+      toast.error("구글 캘린더 반영에 실패했습니다. 저장은 완료됐습니다.");
+    }
+  };
+
   const buildPayload = () => ({
     campaign_id: form.campaign_id,
     title: form.title.trim(),
@@ -127,20 +149,27 @@ export default function ScheduleModal({
       const supabase = createClient();
       const payload = buildPayload();
 
+      let savedId: string | null = null;
       if (isEdit) {
         const { error: err } = await supabase
           .from("campaign_schedules")
           .update({ ...payload, updated_at: new Date().toISOString() })
           .eq("id", schedule.id);
         if (err) throw err;
+        savedId = schedule.id;
         toast.success("일정이 수정되었습니다.");
       } else {
-        const { error: err } = await supabase
+        const { data, error: err } = await supabase
           .from("campaign_schedules")
-          .insert(payload);
+          .insert(payload)
+          .select("id")
+          .single();
         if (err) throw err;
+        savedId = data.id;
         toast.success("일정이 등록되었습니다.");
       }
+
+      if (savedId) await syncToGoogle({ scheduleId: savedId });
       onSaved();
     } catch {
       setError("저장 중 오류가 발생했습니다.");
@@ -159,6 +188,7 @@ export default function ScheduleModal({
         .delete()
         .eq("id", schedule.id);
       if (err) throw err;
+      await syncToGoogle({ deleteScheduleId: schedule.id });
       toast.success("일정이 삭제되었습니다.");
       onSaved();
     } catch {

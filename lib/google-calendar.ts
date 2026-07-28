@@ -56,6 +56,13 @@ export function normalizePrivateKey(raw: string): string {
     .replace(/\\n/g, "\n")
     .trim();
 
+  // JSON에서 한 줄을 통째로 복사하면 앞에 "private_key": 가, 뒤에 ", 가 붙어 온다.
+  // 앞뒤 군더더기와 무관하게 PEM 블록만 뽑아낸다.
+  const block = key.match(
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/
+  );
+  if (block) key = block[0];
+
   // 개행이 하나도 없으면 PEM 본문을 64자씩 끊어 형식을 복원한다
   if (!key.includes("\n")) {
     const m = key.match(
@@ -79,13 +86,89 @@ export function looksLikePem(key: string): boolean {
   );
 }
 
+/** base64로 감싸 넣은 값도 받아준다 (일부 배포 환경에서 개행 보존용으로 쓰는 방식) */
+function tryDecodeBase64(value: string): string | null {
+  const t = value.trim();
+  if (t.length < 40 || !/^[A-Za-z0-9+/=\s]+$/.test(t)) return null;
+  try {
+    const decoded = Buffer.from(t, "base64").toString("utf-8");
+    if (decoded.includes("PRIVATE KEY") || decoded.trimStart().startsWith("{")) {
+      return decoded;
+    }
+  } catch {
+    // base64가 아니었을 뿐
+  }
+  return null;
+}
+
+/**
+ * 자격증명 추출 — 넣는 방법이 여러 가지라 전부 받아준다.
+ *  1) GOOGLE_SERVICE_ACCOUNT_JSON 에 JSON 키 파일 내용을 통째로
+ *  2) GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY 에 private_key 값만
+ *  3) 2번 자리에 실수로 JSON 파일 전체를 넣은 경우도 알아서 꺼내 쓴다
+ * 각 값은 base64로 감싸 넣어도 된다.
+ */
+function extractCredentials(): { email: string | null; privateKey: string | null } {
+  let email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() || null;
+  let keySource =
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ??
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ??
+    null;
+  if (!keySource) return { email, privateKey: null };
+
+  const decoded = tryDecodeBase64(keySource);
+  if (decoded) keySource = decoded;
+
+  const trimmed = keySource.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const json = JSON.parse(trimmed);
+      if (!email && typeof json.client_email === "string") {
+        email = json.client_email.trim();
+      }
+      if (typeof json.private_key === "string") {
+        return { email, privateKey: normalizePrivateKey(json.private_key) };
+      }
+    } catch {
+      // JSON이 깨진 경우 — 아래 진단에서 형태를 알려준다
+    }
+    return { email, privateKey: null };
+  }
+
+  return { email, privateKey: normalizePrivateKey(keySource) };
+}
+
 /** 환경변수가 다 있으면 설정을 돌려주고, 하나라도 없으면 null */
 export function getGoogleCalendarConfig(): GoogleCalendarConfig | null {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
-  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  const { email, privateKey } = extractCredentials();
   const calendarId = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_ID?.trim();
-  if (!email || !rawKey || !calendarId) return null;
-  return { email, privateKey: normalizePrivateKey(rawKey), calendarId };
+  if (!email || !privateKey || !calendarId) return null;
+  return { email, privateKey, calendarId };
+}
+
+/**
+ * 넣은 값의 "형태"만 설명한다 — 키 내용은 절대 노출하지 않고
+ * 무엇이 잘못 들어갔는지만 판단할 수 있게 한다.
+ */
+export function describeKeySource(): string {
+  const raw =
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ??
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  if (!raw) return "값 없음 — 환경변수가 비어 있습니다.";
+
+  const t = raw.trim();
+  const facts: string[] = [`길이 ${t.length}자`];
+  if (tryDecodeBase64(t)) facts.push("base64로 감싸져 있음(자동 해제됨)");
+  if (t.startsWith("{")) facts.push("JSON 객체 (파일 전체 — 자동으로 private_key를 꺼냅니다)");
+  else if (t.startsWith('"') || t.startsWith("'")) facts.push("따옴표로 시작(자동 제거됨)");
+  else if (t.startsWith("-----BEGIN")) facts.push("PEM 헤더로 시작");
+  else facts.push("PEM도 JSON도 아닌 형태 — 값이 잘렸거나 잘못 복사되었을 수 있습니다");
+
+  if (!t.includes("PRIVATE KEY")) {
+    facts.push("'PRIVATE KEY' 문구가 없음 — 값이 잘렸을 가능성이 큽니다");
+  }
+  facts.push(`줄 수 ${t.split(/\r?\n/).length}`);
+  return facts.join(" · ");
 }
 
 function base64url(input: string | Buffer): string {
@@ -311,6 +394,7 @@ export async function diagnose(config: GoogleCalendarConfig): Promise<{
   calendarId: string;
   privateKeyLooksLikePem: boolean;
   privateKeyLines: number;
+  keySourceShape: string;
   tokenIssued: boolean;
   calendarAccessible: boolean;
   error: string | null;
@@ -321,6 +405,8 @@ export async function diagnose(config: GoogleCalendarConfig): Promise<{
     calendarId: config.calendarId,
     privateKeyLooksLikePem: looksLikePem(config.privateKey),
     privateKeyLines: config.privateKey.split("\n").filter(Boolean).length,
+    // 넣은 값의 형태(내용 아님) — 무엇이 잘못 들어갔는지 판단용
+    keySourceShape: describeKeySource(),
   };
 
   try {

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createFinanceClient } from "@/lib/supabase/finance";
+import { fetchCrmKolCount } from "@/lib/supabase/crm";
 import Link from "next/link";
 import { formatDate, formatWon } from "@/lib/utils";
 import {
@@ -63,10 +64,11 @@ export default async function DashboardPage() {
     .from("campaign_influencers")
     .select("*");
 
-  // 인플루언서 수
-  const { count: influencerCount } = await supabase
-    .from("influencers")
-    .select("*", { count: "exact", head: true });
+  // KOL 지표 — 사이드바 "KOL 리스트"는 CRM 아카이브를 보여주는데 대시보드는
+  // 로컬 influencers 테이블을 세고 있어 같은 앱에서 KOL 수가 두 개로 갈렸다.
+  // 둘은 의미가 다르므로(투입 실적 vs 섭외 풀) 하나로 합치지 않고,
+  // "우리 공구에 실제 투입된 KOL"을 지표로 삼고 CRM 풀 크기를 함께 표기한다.
+  const crmKolCount = await fetchCrmKolCount();
 
   // 거래처 전환율 — 컨택한 업체 중 실제로 공구를 연 비율
   const { data: allProspects } = await supabase.from("prospects").select("id");
@@ -152,6 +154,11 @@ export default async function DashboardPage() {
       ?.filter((ci) => ci.is_settled)
       .reduce((sum, ci) => sum + (ci.settlement_amount || 0), 0) ?? 0;
 
+  // 실제 캠페인에 투입된 KOL 수 (같은 KOL이 여러 캠페인에 있어도 1명)
+  const participatedKols = new Set(
+    (campaignInfluencers ?? []).map((ci) => ci.influencer_id)
+  ).size;
+
   const recentCampaigns = campaigns?.slice(0, 5) ?? [];
 
   // ── 거래처 전환 퍼널 ────────────────────────────────────────
@@ -220,9 +227,12 @@ export default async function DashboardPage() {
       ),
     },
     {
-      label: "전체 인플루언서",
-      value: influencerCount ?? 0,
-      sub: "등록된 인플루언서",
+      label: "참여 KOL",
+      value: participatedKols,
+      sub:
+        crmKolCount !== null
+          ? `공구에 투입된 KOL · CRM 아카이브 ${crmKolCount.toLocaleString("ko-KR")}명`
+          : "공구에 투입된 KOL (중복 제외)",
       color: "bg-purple-50 text-purple-600",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

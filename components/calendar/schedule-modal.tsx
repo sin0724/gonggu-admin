@@ -10,6 +10,7 @@ import {
 } from "@/types/database";
 import { googleCalendarUrl } from "@/lib/calendar";
 import { isoToKstDate, isoToKstTime, kstToIso, todayKey } from "@/lib/schedule";
+import { logDeletion } from "@/lib/activity-log";
 
 export interface CalendarCampaignOption {
   id: string;
@@ -183,6 +184,15 @@ export default function ScheduleModal({
     setLoading(true);
     try {
       const supabase = createClient();
+      await logDeletion({
+        entityType: "campaign_schedule",
+        entityId: schedule.id,
+        entityLabel: schedule.title,
+        context: campaign
+          ? `${campaign.client_name} · ${campaign.campaign_name}`
+          : null,
+        snapshot: schedule,
+      });
       const { error: err } = await supabase
         .from("campaign_schedules")
         .delete()
@@ -191,8 +201,8 @@ export default function ScheduleModal({
       await syncToGoogle({ deleteScheduleId: schedule.id });
       toast.success("일정이 삭제되었습니다.");
       onSaved();
-    } catch {
-      setError("삭제 중 오류가 발생했습니다.");
+    } catch (e) {
+      setError((e as Error).message || "삭제 중 오류가 발생했습니다.");
       setLoading(false);
     }
   };

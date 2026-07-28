@@ -14,6 +14,7 @@ import { formatDate, formatWon, formatTwd, krwToTwd } from "@/lib/utils";
 import InfluencerModal from "./influencer-modal";
 import { useToast } from "@/components/ui/toast";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
+import { logDeletion } from "@/lib/activity-log";
 
 interface InfluencerTableProps {
   campaignId: string;
@@ -117,6 +118,14 @@ export default function InfluencerTable({
     setDeleting(true);
     try {
       const supabase = createClient();
+      // 판매·정산 실적이 함께 사라지므로 원본을 통째로 남긴다
+      await logDeletion({
+        entityType: "campaign_influencer",
+        entityId: deleteTarget.id,
+        entityLabel: deleteTarget.influencer.name,
+        context: `판매 ${(deleteTarget.sales_amount || 0).toLocaleString("ko-KR")}원 · 정산 ${deleteTarget.is_settled ? "완료" : "미완"}`,
+        snapshot: deleteTarget,
+      });
       const { error } = await supabase
         .from("campaign_influencers")
         .delete()
@@ -125,8 +134,8 @@ export default function InfluencerTable({
       toast.success(`${deleteTarget.influencer.name} 님을 캠페인에서 제거했습니다.`);
       setDeleteTarget(null);
       router.refresh();
-    } catch {
-      toast.error("삭제 중 오류가 발생했습니다.");
+    } catch (e) {
+      toast.error((e as Error).message || "삭제 중 오류가 발생했습니다.");
     } finally {
       setDeleting(false);
     }

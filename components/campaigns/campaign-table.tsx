@@ -21,6 +21,7 @@ import {
 import StageSelect from "@/components/campaigns/stage-select";
 import { useToast } from "@/components/ui/toast";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
+import { logDeletion } from "@/lib/activity-log";
 
 /** 목록 페이지에서 서버 집계해 내려주는 캠페인별 지표 */
 export interface CampaignStats {
@@ -206,6 +207,14 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
     setWorking(true);
     try {
       const supabase = createClient();
+      // 로그가 남지 않으면 삭제하지 않는다 (실패 시 throw)
+      await logDeletion({
+        entityType: "campaign",
+        entityId: deleteTarget.id,
+        entityLabel: deleteTarget.campaign_name,
+        context: deleteTarget.client_name,
+        snapshot: deleteTarget,
+      });
       const { error } = await supabase
         .from("campaigns")
         .delete()
@@ -214,8 +223,8 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
       toast.success(`"${deleteTarget.campaign_name}" 캠페인이 삭제되었습니다.`);
       setDeleteTarget(null);
       router.refresh();
-    } catch {
-      toast.error("삭제 중 오류가 발생했습니다.");
+    } catch (e) {
+      toast.error((e as Error).message || "삭제 중 오류가 발생했습니다.");
     } finally {
       setWorking(false);
     }

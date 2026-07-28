@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Manager } from "@/types/database";
 import ManagerModal from "./manager-modal";
+import { logDeletion } from "@/lib/activity-log";
 
 interface ManagerTableProps {
   initialManagers: Manager[];
@@ -14,6 +15,7 @@ export default function ManagerTable({ initialManagers }: ManagerTableProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Manager | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleSaved = async () => {
     const supabase = createClient();
@@ -32,10 +34,23 @@ export default function ManagerTable({ initialManagers }: ManagerTableProps) {
   };
 
   const handleDelete = async (id: string) => {
-    const supabase = createClient();
-    await supabase.from("managers").delete().eq("id", id);
-    setManagers((prev) => prev.filter((m) => m.id !== id));
-    setDeleteId(null);
+    const target = managers.find((m) => m.id === id);
+    try {
+      const supabase = createClient();
+      await logDeletion({
+        entityType: "manager",
+        entityId: id,
+        entityLabel: target?.name ?? "(이름 없음)",
+        context: target?.email ?? null,
+        snapshot: target,
+      });
+      const { error } = await supabase.from("managers").delete().eq("id", id);
+      if (error) throw error;
+      setManagers((prev) => prev.filter((m) => m.id !== id));
+      setDeleteId(null);
+    } catch (e) {
+      setDeleteError((e as Error).message || "삭제 중 오류가 발생했습니다.");
+    }
   };
 
   return (
@@ -120,10 +135,24 @@ export default function ManagerTable({ initialManagers }: ManagerTableProps) {
           <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">삭제 확인</h3>
             <p className="text-sm text-gray-500 mb-5">
-              이 담당자를 삭제하시겠습니까? 해당 담당자로 지정된 가망건의 담당자 정보가 초기화됩니다.
+              이 담당자를 삭제하시겠습니까? 해당 담당자로 지정된 거래처의 담당자 정보가 초기화됩니다.
+              삭제 내역은 활동 로그에 원본과 함께 남습니다.
             </p>
+            {deleteError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs mb-4">
+                {deleteError}
+              </div>
+            )}
             <div className="flex justify-end gap-3">
-              <button onClick={() => setDeleteId(null)} className="btn-secondary">취소</button>
+              <button
+                onClick={() => {
+                  setDeleteId(null);
+                  setDeleteError(null);
+                }}
+                className="btn-secondary"
+              >
+                취소
+              </button>
               <button
                 onClick={() => handleDelete(deleteId)}
                 className="px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"

@@ -8,6 +8,7 @@ import { formatWon, formatTwd, krwToTwd } from "@/lib/utils";
 import { resolveTierPrice } from "@/lib/economics";
 import { useToast } from "@/components/ui/toast";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
+import { logDeletion } from "@/lib/activity-log";
 
 // 캠페인별 셀러 관리 — 대만 총판/개별 셀러/공동구매 업체를 "셀러"로 통일.
 // 셀러가 우리에게 견적 단가(수출 영세율 0%)로 구매해가서 판매하는 채널.
@@ -224,6 +225,14 @@ export default function SellerTable({
     setDeleting(true);
     try {
       const supabase = createClient();
+      // 입금 완료 건이면 재무 실적과도 엮이므로 원본을 남겨둔다
+      await logDeletion({
+        entityType: "campaign_seller",
+        entityId: deleteTarget.id,
+        entityLabel: deleteTarget.name,
+        context: `수량 ${(deleteTarget.quantity || 0).toLocaleString("ko-KR")} · 입금 ${deleteTarget.is_paid ? "완료" : "대기"}`,
+        snapshot: deleteTarget,
+      });
       const { error } = await supabase
         .from("campaign_sellers")
         .delete()
@@ -232,8 +241,8 @@ export default function SellerTable({
       toast.success(`"${deleteTarget.name}" 셀러를 제거했습니다.`);
       setDeleteTarget(null);
       router.refresh();
-    } catch {
-      toast.error("삭제 중 오류가 발생했습니다.");
+    } catch (e) {
+      toast.error((e as Error).message || "삭제 중 오류가 발생했습니다.");
     } finally {
       setDeleting(false);
     }

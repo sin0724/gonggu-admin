@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toast";
 import { SellerSale, SellerSaleInsert } from "@/types/database";
 import { todayKey } from "@/lib/schedule";
+import { logDeletion } from "@/lib/activity-log";
 
 export interface SaleCampaignOption {
   id: string;
@@ -118,6 +119,13 @@ export default function SellerSaleModal({
     setLoading(true);
     try {
       const supabase = createClient();
+      await logDeletion({
+        entityType: "seller_sale",
+        entityId: sale.id,
+        entityLabel: sale.title,
+        context: `${sellerName} · ${(sale.amount || 0).toLocaleString("ko-KR")}원`,
+        snapshot: sale,
+      });
       const { error: err } = await supabase
         .from("seller_sales")
         .delete()
@@ -125,8 +133,8 @@ export default function SellerSaleModal({
       if (err) throw err;
       toast.success("실적이 삭제되었습니다.");
       onSaved();
-    } catch {
-      setError("삭제 중 오류가 발생했습니다.");
+    } catch (e) {
+      setError((e as Error).message || "삭제 중 오류가 발생했습니다.");
       setLoading(false);
     }
   };

@@ -35,6 +35,20 @@ export const CRM_KOL_DETAIL_COLUMNS =
   "id, name, instagram_handle, email, followers, categories, rate, visit_note, visit_date, visit_end_date, history, created_at";
 
 /**
+ * CRM KOL 아카이브 총 인원. 대시보드처럼 숫자만 필요한 곳에서 쓴다.
+ * 연동 키가 없으면 null (지표를 0으로 표시해 오해를 주지 않기 위해).
+ */
+export async function fetchCrmKolCount(): Promise<number | null> {
+  const crm = createCrmClient();
+  if (!crm) return null;
+  const { count, error } = await crm
+    .from("kols")
+    .select("*", { count: "exact", head: true });
+  if (error) return null;
+  return count ?? 0;
+}
+
+/**
  * KOL 아카이브 전체 조회 — 리스트 화면은 클라이언트에서 검색/필터하므로
  * 한 번에 받아온다. 아카이브 규모가 수천 건을 넘으면 서버 필터로 바꿔야 한다.
  */

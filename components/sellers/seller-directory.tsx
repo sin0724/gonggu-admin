@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
 import { Seller, SellerSale } from "@/types/database";
 import { formatDate, formatNumber, formatWon } from "@/lib/utils";
+import { logDeletion } from "@/lib/activity-log";
 import SellerModal from "@/components/sellers/seller-modal";
 import SellerSaleModal, {
   SaleCampaignOption,
@@ -104,6 +105,19 @@ export default function SellerDirectory({
     setWorking(true);
     try {
       const supabase = createClient();
+      // 실적까지 함께 사라지므로 스냅샷에 같이 담는다
+      await logDeletion({
+        entityType: "seller",
+        entityId: deleteTarget.id,
+        entityLabel: deleteTarget.name,
+        context: [deleteTarget.region, deleteTarget.channel]
+          .filter(Boolean)
+          .join(" · "),
+        snapshot: {
+          ...deleteTarget,
+          sales: salesBySeller.get(deleteTarget.id) ?? [],
+        },
+      });
       const { error } = await supabase
         .from("sellers")
         .delete()
@@ -112,8 +126,8 @@ export default function SellerDirectory({
       toast.success(`"${deleteTarget.name}" 셀러가 삭제되었습니다.`);
       setDeleteTarget(null);
       router.refresh();
-    } catch {
-      toast.error("삭제 중 오류가 발생했습니다.");
+    } catch (e) {
+      toast.error((e as Error).message || "삭제 중 오류가 발생했습니다.");
     } finally {
       setWorking(false);
     }

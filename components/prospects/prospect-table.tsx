@@ -11,6 +11,7 @@ import {
   PROSPECT_STATUS_COLORS,
 } from "@/types/database";
 import ProspectModal from "./prospect-modal";
+import { logDeletion } from "@/lib/activity-log";
 import { CampaignStage, STAGE_LABEL } from "@/lib/campaign-stage";
 import {
   ACCOUNT_STAGES,
@@ -49,6 +50,7 @@ export default function ProspectTable({
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ProspectWithManager | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
 
   const duplicateNumbers = useMemo(() => {
@@ -141,10 +143,23 @@ export default function ProspectTable({
   };
 
   const handleDelete = async (id: string) => {
-    const supabase = createClient();
-    await supabase.from("prospects").delete().eq("id", id);
-    setProspects((prev) => prev.filter((p) => p.id !== id));
-    setDeleteId(null);
+    const target = prospects.find((p) => p.id === id);
+    try {
+      const supabase = createClient();
+      await logDeletion({
+        entityType: "prospect",
+        entityId: id,
+        entityLabel: target?.company_name ?? "(이름 없음)",
+        context: target?.business_number ?? null,
+        snapshot: target,
+      });
+      const { error } = await supabase.from("prospects").delete().eq("id", id);
+      if (error) throw error;
+      setProspects((prev) => prev.filter((p) => p.id !== id));
+      setDeleteId(null);
+    } catch (e) {
+      setDeleteError((e as Error).message || "삭제 중 오류가 발생했습니다.");
+    }
   };
 
   return (
@@ -429,9 +444,24 @@ export default function ProspectTable({
           <div className="absolute inset-0 bg-black/40" onClick={() => setDeleteId(null)} />
           <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">삭제 확인</h3>
-            <p className="text-sm text-gray-500 mb-5">이 거래처를 삭제하시겠습니까? 복구할 수 없습니다.</p>
+            <p className="text-sm text-gray-500 mb-5">
+              이 거래처를 삭제하시겠습니까? 삭제 내역은 활동 로그에 원본과 함께 남습니다.
+            </p>
+            {deleteError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs mb-4">
+                {deleteError}
+              </div>
+            )}
             <div className="flex justify-end gap-3">
-              <button onClick={() => setDeleteId(null)} className="btn-secondary">취소</button>
+              <button
+                onClick={() => {
+                  setDeleteId(null);
+                  setDeleteError(null);
+                }}
+                className="btn-secondary"
+              >
+                취소
+              </button>
               <button
                 onClick={() => handleDelete(deleteId)}
                 className="px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"

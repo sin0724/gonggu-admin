@@ -37,6 +37,24 @@ interface CampaignRow {
   end_date: string | null;
 }
 
+/**
+ * Supabase 키의 role 클레임을 읽는다 — anon 키를 SUPABASE_SERVICE_ROLE_KEY에
+ * 잘못 넣으면 RLS에 막혀 "빈 캘린더"가 조용히 나가는 사고가 나서, 진단에서 잡는다.
+ * 신형 키(sb_secret_…)는 JWT가 아니라 role을 알 수 없으므로 opaque로 표기.
+ */
+function keyRole(key: string): string {
+  const parts = key.split(".");
+  if (parts.length !== 3) return "opaque (JWT 아님)";
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64").toString("utf-8")
+    );
+    return String(payload.role ?? "unknown");
+  } catch {
+    return "unknown";
+  }
+}
+
 /** timestamptz → 종일 이벤트용 YYYY-MM-DD (한국 시간 기준) */
 function toSeoulDate(iso: string): string {
   const d = new Date(iso);
@@ -72,7 +90,10 @@ export async function GET(request: Request) {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const [{ data: schedules }, { data: campaigns }] = await Promise.all([
+  const [
+    { data: schedules, error: scheduleError },
+    { data: campaigns, error: campaignError },
+  ] = await Promise.all([
     supabase
       .from("campaign_schedules")
       .select(
@@ -139,6 +160,24 @@ export async function GET(request: Request) {
       start,
       end: c.end_date ?? start,
       url: `${origin}/campaigns/${c.id}`,
+    });
+  }
+
+  // ?debug=1 — 구글에 일정이 안 뜰 때 어디서 끊겼는지 보는 진단용.
+  // 키 role이 service_role이 아니면 RLS에 막혀 0건이 나가므로 그것부터 확인한다.
+  if (searchParams.get("debug") === "1") {
+    return Response.json({
+      supabaseKeyRole: keyRole(key),
+      campaignCount: campaigns?.length ?? 0,
+      scheduleCount: schedules?.length ?? 0,
+      eventCount: events.length,
+      campaignError: campaignError?.message ?? null,
+      scheduleError: scheduleError?.message ?? null,
+      origin,
+      hint:
+        events.length === 0
+          ? "이벤트 0건입니다. supabaseKeyRole이 service_role이 아니면 RLS에 막힌 것이고, service_role인데도 0건이면 등록된 일정이 없거나 캠페인이 종료·보류 단계입니다."
+          : "피드는 정상입니다. 구글에 안 보이면 구독 갱신 지연(수 시간)이거나 구독 주소가 외부에서 접근 불가한 주소입니다.",
     });
   }
 

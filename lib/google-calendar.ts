@@ -300,6 +300,50 @@ const calendarPath = (config: GoogleCalendarConfig) =>
   `/calendars/${encodeURIComponent(config.calendarId)}`;
 
 /**
+ * 구글 API 오류를 사람이 바로 조치할 수 있는 한국어 메시지로 바꾼다.
+ * 원문 JSON을 그대로 토스트에 띄우면 무엇을 해야 하는지 알 수 없다.
+ */
+async function describeApiError(
+  res: Response,
+  action: string
+): Promise<string> {
+  const text = await res.text();
+  let reason = "";
+  let message = "";
+  try {
+    const body = JSON.parse(text);
+    reason = body.error?.errors?.[0]?.reason ?? "";
+    message = body.error?.message ?? "";
+  } catch {
+    // JSON이 아니면 원문 일부만 쓴다
+  }
+
+  if (
+    res.status === 403 &&
+    (reason === "requiredAccessLevel" || /writer access/i.test(message))
+  ) {
+    return (
+      "캘린더 쓰기 권한이 없습니다. 구글 캘린더에서 해당 캘린더 → 설정 및 공유 → " +
+      "'특정 사용자 또는 그룹과 공유'에 서비스 계정 이메일을 추가하고, " +
+      "권한을 '일정 변경' 이상으로 지정해 주세요."
+    );
+  }
+  if (res.status === 403 && reason === "rateLimitExceeded") {
+    return "구글 API 호출 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요.";
+  }
+  if (res.status === 404) {
+    return (
+      "캘린더를 찾을 수 없습니다. NEXT_PUBLIC_GOOGLE_CALENDAR_ID가 맞는지, " +
+      "서비스 계정이 그 캘린더의 공유 목록에 있는지 확인해 주세요."
+    );
+  }
+  if (res.status === 401) {
+    return "구글 인증이 거부되었습니다. 서비스 계정 키가 유효한지 확인해 주세요.";
+  }
+  return `${action} 실패 (${res.status}): ${message || text.slice(0, 200)}`;
+}
+
+/**
  * 이벤트 생성 또는 갱신.
  * id가 결정적이라 먼저 update를 시도하고, 없으면(404) insert 한다.
  * 삭제됐던 id로 insert하면 409가 나는데, 그때는 다시 update로 되살린다.
@@ -331,12 +375,12 @@ export async function upsertEvent(
         body,
       });
       if (revived.ok) return;
-      throw new Error(`이벤트 복구 실패 (${revived.status}): ${await revived.text()}`);
+      throw new Error(await describeApiError(revived, "이벤트 복구"));
     }
-    throw new Error(`이벤트 생성 실패 (${inserted.status}): ${await inserted.text()}`);
+    throw new Error(await describeApiError(inserted, "이벤트 생성"));
   }
 
-  throw new Error(`이벤트 갱신 실패 (${updated.status}): ${await updated.text()}`);
+  throw new Error(await describeApiError(updated, "이벤트 갱신"));
 }
 
 /** 이벤트 삭제. 이미 없으면 성공으로 친다. */
@@ -350,7 +394,7 @@ export async function deleteEvent(
     { method: "DELETE" }
   );
   if (res.ok || res.status === 404 || res.status === 410) return;
-  throw new Error(`이벤트 삭제 실패 (${res.status}): ${await res.text()}`);
+  throw new Error(await describeApiError(res, "이벤트 삭제"));
 }
 
 /** 우리가 만든 이벤트의 id 목록 (수기 등록 일정은 태그가 없어 제외된다) */
@@ -374,7 +418,7 @@ export async function listManagedEventIds(
       `${calendarPath(config)}/events?${params.toString()}`
     );
     if (!res.ok) {
-      throw new Error(`이벤트 목록 조회 실패 (${res.status}): ${await res.text()}`);
+      throw new Error(await describeApiError(res, "이벤트 목록 조회"));
     }
     const body = await res.json();
     for (const item of body.items ?? []) if (item.id) ids.push(item.id);

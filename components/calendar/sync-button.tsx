@@ -37,8 +37,15 @@ export default function SyncButton() {
 
       const errors: string[] = body.errors ?? [];
       if (errors.length > 0) {
+        // 대부분 원인이 하나(권한 등)인데 이벤트마다 반복돼서 나온다.
+        // 이벤트명 접두사를 떼고 원인만 모아 중복을 없앤다.
+        const causes = [
+          ...new Set(errors.map((e) => e.replace(/^.*?: /, ""))),
+        ];
         toast.error(
-          `일부 실패 (${errors.length}건): ${errors[0]}`
+          causes.length === 1
+            ? causes[0]
+            : `${causes.length}가지 오류: ${causes.join(" / ")}`
         );
         return;
       }

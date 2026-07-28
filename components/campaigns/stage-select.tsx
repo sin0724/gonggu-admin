@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toast";
+import { withRo } from "@/lib/utils";
 import {
   CAMPAIGN_STAGES,
   CampaignStage,
@@ -54,7 +55,7 @@ export default function StageSelect({
         body: JSON.stringify({ campaignId }),
       }).catch(() => {});
 
-      toast.success(`단계를 "${STAGE_LABEL[next]}"(으)로 변경했습니다.`);
+      toast.success(`단계를 ${withRo(STAGE_LABEL[next])} 변경했습니다.`);
       router.refresh();
     } catch {
       setValue(prev);

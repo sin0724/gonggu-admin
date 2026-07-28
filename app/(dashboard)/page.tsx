@@ -4,11 +4,13 @@ import Link from "next/link";
 import { formatDate, formatWon } from "@/lib/utils";
 import {
   ACTIVE_STAGES,
+  OPENED_STAGES,
   PIPELINE_STAGES,
   resolveStage,
   STAGE_COLOR,
   STAGE_LABEL,
 } from "@/lib/campaign-stage";
+import ConversionFunnel from "@/components/dashboard/conversion-funnel";
 import { getProgressStatus } from "@/types/database";
 
 // 재무 실적은 외부 프로젝트(tianxia-finance) DB에서 매번 읽어야 하므로 캐시하지 않는다.
@@ -65,6 +67,9 @@ export default async function DashboardPage() {
   const { count: influencerCount } = await supabase
     .from("influencers")
     .select("*", { count: "exact", head: true });
+
+  // 거래처 전환율 — 컨택한 업체 중 실제로 공구를 연 비율
+  const { data: allProspects } = await supabase.from("prospects").select("id");
 
   // 재무 확정 취급액 — 재무관리(tianxia-finance)의 공구 사업부 실적을 직접 합산.
   // campaign_finance(동기화 사본)는 재무팀이 캠페인 연동 행을 저장할 때만 갱신되어
@@ -148,6 +153,35 @@ export default async function DashboardPage() {
       .reduce((sum, ci) => sum + (ci.settlement_amount || 0), 0) ?? 0;
 
   const recentCampaigns = campaigns?.slice(0, 5) ?? [];
+
+  // ── 거래처 전환 퍼널 ────────────────────────────────────────
+  // 각 단계는 앞 단계의 부분집합이어야 한다(누적). 컨택 상태는 별개 축이라 섞지 않는다.
+  const totalAccounts = allProspects?.length ?? 0;
+  const withCampaign = new Set<string>();
+  const withOpened = new Set<string>();
+  for (const c of campaigns ?? []) {
+    if (!c.prospect_id) continue;
+    withCampaign.add(c.prospect_id);
+    if (OPENED_STAGES.includes(resolveStage(c))) withOpened.add(c.prospect_id);
+  }
+
+  const funnelStages = [
+    {
+      label: "전체 거래처",
+      count: totalAccounts,
+      hint: "거래처 관리에 등록된 모든 업체",
+    },
+    {
+      label: "캠페인 등록",
+      count: withCampaign.size,
+      hint: "캠페인이 하나 이상 연결된 업체",
+    },
+    {
+      label: "공구 오픈",
+      count: withOpened.size,
+      hint: "실제로 공구를 연 적이 있는 업체 (보류·준비 단계 제외)",
+    },
+  ];
 
   const moneyStats = [
     {
@@ -258,6 +292,9 @@ export default async function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      {/* 거래처 전환율 — 영업 퍼널이 어디서 끊기는지 */}
+      <ConversionFunnel stages={funnelStages} />
 
       {/* 월별 확정 취급액 추이 — 재무 실적 기준 최근 12개월 */}
       {hasMonthlyData && (

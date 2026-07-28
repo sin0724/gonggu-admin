@@ -76,6 +76,12 @@ export const PIPELINE_STAGES: CampaignStage[] = ["lead", "setup", "recruiting"];
 export const CLOSED_STAGES: CampaignStage[] = ["done", "dropped"];
 
 /**
+ * 공구를 실제로 연 적이 있는 단계 — 전환율 계산 기준.
+ * dropped는 오픈 전에 무산된 것이므로 제외한다.
+ */
+export const OPENED_STAGES: CampaignStage[] = ["live", "settling", "done"];
+
+/**
  * 저장된 status를 안전하게 해석한다.
  * status 컬럼 도입 전 데이터(null)는 날짜로 추론해서 채운다.
  */

@@ -62,3 +62,17 @@ export function formatMoney(
 
 // 캠페인 상태는 날짜 추론(예정/진행중/종료)에서 명시적 진행 단계로 옮겼다.
 // 단일 소스는 lib/campaign-stage.ts — resolveStage / STAGE_LABEL / STAGE_COLOR 사용.
+
+/**
+ * 한글 조사 "로/으로"를 받침에 맞춰 붙인다.
+ * 단계 이름이 값에 따라 바뀌는 문구("셋업으로", "진행중으로")에서
+ * "(으)로" 같은 회피 표기 없이 자연스럽게 읽히도록.
+ * 받침이 없거나 ㄹ 받침이면 "로", 그 외에는 "으로".
+ */
+export function withRo(word: string): string {
+  const code = word.charCodeAt(word.length - 1);
+  // 한글 음절 영역이 아니면(영문·숫자 등) 판단할 수 없으므로 기본형
+  if (Number.isNaN(code) || code < 0xac00 || code > 0xd7a3) return `${word}로`;
+  const jongseong = (code - 0xac00) % 28;
+  return jongseong === 0 || jongseong === 8 ? `${word}로` : `${word}으로`;
+}

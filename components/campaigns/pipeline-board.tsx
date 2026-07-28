@@ -12,7 +12,7 @@ import {
   STAGE_DOT,
   STAGE_LABEL,
 } from "@/lib/campaign-stage";
-import { formatDate, formatMoney } from "@/lib/utils";
+import { formatDate, formatMoney, withRo } from "@/lib/utils";
 import StageSelect from "@/components/campaigns/stage-select";
 
 export interface PipelineCampaign {
@@ -191,7 +191,7 @@ export default function PipelineBoard({ campaigns }: PipelineBoardProps) {
                         >
                           {movingId === c.id
                             ? "이동 중..."
-                            : `${STAGE_LABEL[NEXT_STAGE[c.stage]]}로 →`}
+                            : `${withRo(STAGE_LABEL[NEXT_STAGE[c.stage]])} →`}
                         </button>
                       </div>
                     </div>

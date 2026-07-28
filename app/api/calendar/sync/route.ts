@@ -7,6 +7,7 @@ import {
 } from "@/lib/calendar-events";
 import {
   deleteEvent,
+  diagnose,
   getGoogleCalendarConfig,
   reconcile,
   upsertEvent,
@@ -163,8 +164,11 @@ export async function POST(request: Request) {
   }
 }
 
-/** 연동 설정 여부 확인용 — 화면에서 버튼 노출 판단에 쓴다 */
-export async function GET() {
+/**
+ * 연동 설정 여부 확인.
+ * ?test=1 이면 토큰 발급과 캘린더 접근까지 실제로 시도해 어디서 막혔는지 알려준다.
+ */
+export async function GET(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -172,5 +176,25 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
   }
-  return NextResponse.json({ configured: getGoogleCalendarConfig() !== null });
+
+  const config = getGoogleCalendarConfig();
+  if (!config) {
+    return NextResponse.json({
+      configured: false,
+      missing: [
+        !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
+          "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+        !process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY &&
+          "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY",
+        !process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_ID &&
+          "NEXT_PUBLIC_GOOGLE_CALENDAR_ID",
+      ].filter(Boolean),
+    });
+  }
+
+  if (new URL(request.url).searchParams.get("test") === "1") {
+    return NextResponse.json({ configured: true, ...(await diagnose(config)) });
+  }
+
+  return NextResponse.json({ configured: true });
 }

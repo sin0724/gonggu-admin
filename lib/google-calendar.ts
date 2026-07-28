@@ -30,17 +30,62 @@ export interface GoogleCalendarConfig {
   calendarId: string;
 }
 
+/**
+ * 환경변수의 private key를 OpenSSL이 받아들이는 PEM으로 정규화한다.
+ *
+ * 실무에서 깨지는 경우가 많아 전부 흡수한다:
+ *  - JSON에서 값을 따옴표째 복사해 "-----BEGIN…" 으로 들어온 경우
+ *  - 개행이 \n 문자열로 이스케이프된 경우 (\\n 으로 이중 이스케이프된 경우 포함)
+ *  - 붙여넣기 과정에서 개행이 통째로 사라져 한 줄이 된 경우
+ * 이걸 놓치면 서명 단계에서 DECODER routines::unsupported 로만 보여 원인을 찾기 어렵다.
+ */
+export function normalizePrivateKey(raw: string): string {
+  let key = raw.trim();
+
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1);
+  }
+
+  // 이중 이스케이프를 먼저 풀어야 한 번만 남은 것과 섞이지 않는다
+  key = key
+    .replace(/\\\\n/g, "\n")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .trim();
+
+  // 개행이 하나도 없으면 PEM 본문을 64자씩 끊어 형식을 복원한다
+  if (!key.includes("\n")) {
+    const m = key.match(
+      /^-----BEGIN ([A-Z ]+)-----\s*([\s\S]*?)\s*-----END \1-----$/
+    );
+    if (m) {
+      const body = m[2].replace(/\s+/g, "");
+      const lines = body.match(/.{1,64}/g) ?? [];
+      key = `-----BEGIN ${m[1]}-----\n${lines.join("\n")}\n-----END ${m[1]}-----`;
+    }
+  }
+
+  return `${key.trim()}\n`;
+}
+
+/** private key가 PEM 꼴인지 — 진단 메시지에 쓴다 */
+export function looksLikePem(key: string): boolean {
+  return (
+    /^-----BEGIN [A-Z ]*PRIVATE KEY-----\n/.test(key) &&
+    /-----END [A-Z ]*PRIVATE KEY-----\n?$/.test(key)
+  );
+}
+
 /** 환경변수가 다 있으면 설정을 돌려주고, 하나라도 없으면 null */
 export function getGoogleCalendarConfig(): GoogleCalendarConfig | null {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
-  // Railway 같은 환경에서는 개행이 \n 문자열로 들어오므로 되돌린다
-  const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(
-    /\\n/g,
-    "\n"
-  ).trim();
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
   const calendarId = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_ID?.trim();
-  if (!email || !privateKey || !calendarId) return null;
-  return { email, privateKey, calendarId };
+  if (!email || !rawKey || !calendarId) return null;
+  return { email, privateKey: normalizePrivateKey(rawKey), calendarId };
 }
 
 function base64url(input: string | Buffer): string {
@@ -72,9 +117,21 @@ async function getAccessToken(config: GoogleCalendarConfig): Promise<string> {
     })
   );
 
-  const signer = createSign("RSA-SHA256");
-  signer.update(`${header}.${claim}`);
-  const signature = base64url(signer.sign(config.privateKey));
+  let signature: string;
+  try {
+    const signer = createSign("RSA-SHA256");
+    signer.update(`${header}.${claim}`);
+    signature = base64url(signer.sign(config.privateKey));
+  } catch (e) {
+    // OpenSSL은 "DECODER routines::unsupported" 같은 메시지만 주므로
+    // 실제 원인(키 형식 깨짐)을 짚어준다
+    throw new Error(
+      `서비스 계정 private key를 읽지 못했습니다 (${(e as Error).message}). ` +
+        `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY 값이 JSON의 private_key 그대로인지, ` +
+        `앞뒤 따옴표가 섞여 들어가지 않았는지 확인해 주세요. ` +
+        `/api/calendar/sync?test=1 로 진단할 수 있습니다.`
+    );
+  }
   const assertion = `${header}.${claim}.${signature}`;
 
   const res = await fetch(TOKEN_URL, {
@@ -242,6 +299,72 @@ export async function listManagedEventIds(
   } while (pageToken);
 
   return ids;
+}
+
+/**
+ * 연동 진단 — 토큰 발급과 캘린더 접근까지 실제로 시도해 어디서 막혔는지 알려준다.
+ * 키 자체는 절대 응답에 담지 않는다.
+ */
+export async function diagnose(config: GoogleCalendarConfig): Promise<{
+  ok: boolean;
+  serviceAccountEmail: string;
+  calendarId: string;
+  privateKeyLooksLikePem: boolean;
+  privateKeyLines: number;
+  tokenIssued: boolean;
+  calendarAccessible: boolean;
+  error: string | null;
+  hint: string | null;
+}> {
+  const base = {
+    serviceAccountEmail: config.email,
+    calendarId: config.calendarId,
+    privateKeyLooksLikePem: looksLikePem(config.privateKey),
+    privateKeyLines: config.privateKey.split("\n").filter(Boolean).length,
+  };
+
+  try {
+    await getAccessToken(config);
+  } catch (e) {
+    return {
+      ...base,
+      ok: false,
+      tokenIssued: false,
+      calendarAccessible: false,
+      error: (e as Error).message,
+      hint: base.privateKeyLooksLikePem
+        ? "키 형식은 맞아 보입니다. 서비스 계정 이메일이 JSON의 client_email과 같은지 확인해 주세요."
+        : "private key가 PEM 형식이 아닙니다. JSON의 private_key 값을 따옴표 없이 그대로 넣어 주세요.",
+    };
+  }
+
+  // 캘린더 접근 — 공유 설정에 서비스 계정이 빠지면 여기서 404/403이 난다
+  const res = await callApi(config, `${calendarPath(config)}/events?maxResults=1`);
+  if (!res.ok) {
+    const text = await res.text();
+    return {
+      ...base,
+      ok: false,
+      tokenIssued: true,
+      calendarAccessible: false,
+      error: `캘린더 접근 실패 (${res.status}): ${text.slice(0, 300)}`,
+      hint:
+        res.status === 404
+          ? "캘린더를 찾을 수 없습니다. 캘린더 ID가 맞는지, 그리고 캘린더 공유 설정에 서비스 계정 이메일이 추가됐는지 확인해 주세요."
+          : res.status === 403
+            ? "권한이 없습니다. 캘린더 공유 설정에서 서비스 계정 권한을 '변경 및 공유 관리 권한'으로 올려 주세요."
+            : "Google Calendar API가 프로젝트에서 사용 설정됐는지 확인해 주세요.",
+    };
+  }
+
+  return {
+    ...base,
+    ok: true,
+    tokenIssued: true,
+    calendarAccessible: true,
+    error: null,
+    hint: "연동 정상입니다. '팀 캘린더 동기화'를 눌러 기존 일정을 올리세요.",
+  };
 }
 
 export interface SyncResult {

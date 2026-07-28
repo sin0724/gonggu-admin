@@ -55,6 +55,25 @@ function keyRole(key: string): string {
   }
 }
 
+/**
+ * 외부에서 보이는 배포 주소를 찾는다.
+ * Railway/Vercel 뒤에서는 request.url이 내부 주소(https://localhost:8080)라
+ * 그대로 쓰면 ICS 안의 캠페인 링크가 죽는다. 우선순위:
+ *   NEXT_PUBLIC_SITE_URL → x-forwarded-host → host → request.url
+ */
+function resolveOrigin(request: Request): string {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+
+  const host =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (host && !host.startsWith("localhost") && !host.startsWith("127.0.0.1")) {
+    const proto = request.headers.get("x-forwarded-proto") ?? "https";
+    return `${proto}://${host}`;
+  }
+  return new URL(request.url).origin;
+}
+
 /** timestamptz → 종일 이벤트용 YYYY-MM-DD (한국 시간 기준) */
 function toSeoulDate(iso: string): string {
   const d = new Date(iso);
@@ -109,9 +128,10 @@ export async function GET(request: Request) {
     ((campaigns ?? []) as CampaignRow[]).map((c) => [c.id, c])
   );
 
-  // 배포 주소 — 일정 설명에 캠페인 상세 링크를 넣어준다
-  const origin =
-    process.env.NEXT_PUBLIC_SITE_URL ?? new URL(request.url).origin;
+  // 배포 주소 — 일정 설명에 캠페인 상세 링크를 넣어준다.
+  // request.url은 Railway 내부 프록시 주소(localhost:8080)라 그대로 쓰면 안 되고,
+  // 프록시가 붙여주는 x-forwarded-* 를 먼저 본다.
+  const origin = resolveOrigin(request);
 
   const events: CalendarEvent[] = [];
 

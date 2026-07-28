@@ -11,18 +11,40 @@ import {
   PROSPECT_STATUS_COLORS,
 } from "@/types/database";
 import ProspectModal from "./prospect-modal";
+import { CampaignStage, STAGE_LABEL } from "@/lib/campaign-stage";
+import {
+  ACCOUNT_STAGES,
+  ACCOUNT_STAGE_COLOR,
+  ACCOUNT_STAGE_DESCRIPTION,
+  AccountStage,
+  resolveAccountStage,
+} from "@/lib/account-stage";
+
+/** 거래처에 연결된 캠페인 요약 */
+export interface LinkedCampaign {
+  id: string;
+  campaign_name: string;
+  stage: CampaignStage;
+}
 
 interface ProspectTableProps {
   initialProspects: ProspectWithManager[];
   managers: Manager[];
+  /** 가망건 id → 연결된 캠페인들. 거래 단계를 여기서 파생한다 */
+  campaignsByProspect: Record<string, LinkedCampaign[]>;
 }
 
 const ALL_STATUSES: (ProspectStatus | "전체")[] = ["전체", "발송완료", "입점완료", "무응답", "거절"];
 
-export default function ProspectTable({ initialProspects, managers }: ProspectTableProps) {
+export default function ProspectTable({
+  initialProspects,
+  managers,
+  campaignsByProspect,
+}: ProspectTableProps) {
   const [prospects, setProspects] = useState<ProspectWithManager[]>(initialProspects);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProspectStatus | "전체">("전체");
+  const [stageFilter, setStageFilter] = useState<AccountStage | "전체">("전체");
   const [managerFilter, setManagerFilter] = useState<string>("전체");
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ProspectWithManager | undefined>(undefined);
@@ -41,6 +63,23 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
     );
   }, [prospects]);
 
+  /** 거래 단계 — 연결된 캠페인에서 파생 (사람이 고치는 값이 아님) */
+  const stageOf = useMemo(() => {
+    const map = new Map<string, AccountStage>();
+    for (const p of prospects) {
+      const linked = campaignsByProspect[p.id] ?? [];
+      map.set(p.id, resolveAccountStage(linked.map((c) => c.stage)));
+    }
+    return map;
+  }, [prospects, campaignsByProspect]);
+
+  const stageCounts = useMemo(() => {
+    const counts: Record<string, number> = { 전체: prospects.length };
+    for (const s of ACCOUNT_STAGES) counts[s] = 0;
+    for (const p of prospects) counts[stageOf.get(p.id) ?? "가망"]++;
+    return counts;
+  }, [prospects, stageOf]);
+
   const filtered = useMemo(() => {
     return prospects.filter((p) => {
       const matchSearch =
@@ -48,13 +87,15 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
         p.company_name.toLowerCase().includes(search.toLowerCase()) ||
         p.business_number.includes(search);
       const matchStatus = statusFilter === "전체" || p.status === statusFilter;
+      const matchStage =
+        stageFilter === "전체" || stageOf.get(p.id) === stageFilter;
       const matchManager =
         managerFilter === "전체" ||
         (managerFilter === "미배정" ? !p.manager_id : p.manager_id === managerFilter);
       const matchDuplicate = !showDuplicatesOnly || duplicateNumbers.has(p.business_number);
-      return matchSearch && matchStatus && matchManager && matchDuplicate;
+      return matchSearch && matchStatus && matchStage && matchManager && matchDuplicate;
     });
-  }, [prospects, search, statusFilter, managerFilter, showDuplicatesOnly, duplicateNumbers]);
+  }, [prospects, search, statusFilter, stageFilter, stageOf, managerFilter, showDuplicatesOnly, duplicateNumbers]);
 
   const handleSaved = async () => {
     const supabase = createClient();
@@ -79,20 +120,24 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
       담당자명: p.contact_name ?? "",
       전화번호: p.phone ?? "",
       우리측담당자: p.manager?.name ?? "",
-      상태: p.status,
+      거래단계: stageOf.get(p.id) ?? "가망",
+      연결캠페인: (campaignsByProspect[p.id] ?? [])
+        .map((c) => c.campaign_name)
+        .join(", "),
+      컨택상태: p.status,
       특이사항: p.notes ?? "",
       등록일: new Date(p.created_at).toLocaleDateString("ko-KR"),
     }));
 
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [
-      { wch: 20 }, { wch: 16 }, { wch: 12 },
-      { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 12 },
+      { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 12 },
+      { wch: 10 }, { wch: 28 }, { wch: 10 }, { wch: 30 }, { wch: 12 },
     ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "가망건");
+    XLSX.utils.book_append_sheet(wb, ws, "거래처");
     const date = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `가망건_${date}.xlsx`);
+    XLSX.writeFile(wb, `거래처_${date}.xlsx`);
   };
 
   const handleDelete = async (id: string) => {
@@ -106,8 +151,35 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
     <>
       {/* 상단 컨트롤 */}
       <div className="flex flex-col gap-3">
+        {/* 거래 단계 — 캠페인 연결에서 자동 파생 */}
+        <div className="flex gap-2 flex-wrap items-center">
+          <span className="text-xs font-semibold text-gray-400 mr-1">거래 단계</span>
+          {(["전체", ...ACCOUNT_STAGES] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStageFilter(s)}
+              title={s === "전체" ? undefined : ACCOUNT_STAGE_DESCRIPTION[s]}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                stageFilter === s
+                  ? "bg-gray-900 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {s}
+              <span
+                className={`rounded-full px-1.5 text-[10px] font-bold ${
+                  stageFilter === s ? "bg-white/25 text-white" : "bg-white text-gray-500"
+                }`}
+              >
+                {stageCounts[s] ?? 0}
+              </span>
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div className="flex gap-2 flex-wrap items-center">
+            <span className="text-xs font-semibold text-gray-400 mr-1">컨택 상태</span>
             {ALL_STATUSES.map((s) => (
               <button
                 key={s}
@@ -216,7 +288,8 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
                 <th className="text-left px-4 py-3 font-medium text-gray-500">업체 담당자</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">전화번호</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">우리측 담당자</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">상태</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">거래 단계</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">컨택 상태</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">특이사항</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">등록일</th>
                 <th className="px-4 py-3" />
@@ -225,12 +298,15 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
+                  <td colSpan={10} className="px-4 py-10 text-center text-gray-400 text-sm">
                     {showDuplicatesOnly
                       ? "중복된 사업자번호가 없습니다."
-                      : search || statusFilter !== "전체" || managerFilter !== "전체"
-                      ? "검색 결과가 없습니다."
-                      : "등록된 가망건이 없습니다."}
+                      : search ||
+                          statusFilter !== "전체" ||
+                          stageFilter !== "전체" ||
+                          managerFilter !== "전체"
+                        ? "검색 결과가 없습니다."
+                        : "등록된 거래처가 없습니다."}
                   </td>
                 </tr>
               ) : (
@@ -255,6 +331,41 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
                       ) : (
                         <span className="text-gray-400 text-xs">미배정</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const stage = stageOf.get(p.id) ?? "가망";
+                        const linked = campaignsByProspect[p.id] ?? [];
+                        return (
+                          <div>
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${ACCOUNT_STAGE_COLOR[stage]}`}
+                              title={ACCOUNT_STAGE_DESCRIPTION[stage]}
+                            >
+                              {stage}
+                            </span>
+                            {linked.length > 0 && (
+                              <div className="mt-1 space-y-0.5">
+                                {linked.slice(0, 2).map((c) => (
+                                  <Link
+                                    key={c.id}
+                                    href={`/campaigns/${c.id}`}
+                                    className="block text-[11px] text-primary-600 hover:underline truncate max-w-[150px]"
+                                    title={`${c.campaign_name} (${STAGE_LABEL[c.stage]})`}
+                                  >
+                                    {c.campaign_name}
+                                  </Link>
+                                ))}
+                                {linked.length > 2 && (
+                                  <span className="text-[11px] text-gray-400">
+                                    외 {linked.length - 2}건
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PROSPECT_STATUS_COLORS[p.status]}`}>
@@ -318,7 +429,7 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
           <div className="absolute inset-0 bg-black/40" onClick={() => setDeleteId(null)} />
           <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">삭제 확인</h3>
-            <p className="text-sm text-gray-500 mb-5">이 가망건을 삭제하시겠습니까? 복구할 수 없습니다.</p>
+            <p className="text-sm text-gray-500 mb-5">이 거래처를 삭제하시겠습니까? 복구할 수 없습니다.</p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setDeleteId(null)} className="btn-secondary">취소</button>
               <button

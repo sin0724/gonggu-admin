@@ -1,20 +1,26 @@
 import { createClient } from "@/lib/supabase/server";
-import ProspectTable from "@/components/prospects/prospect-table";
+import ProspectTable, {
+  LinkedCampaign,
+} from "@/components/prospects/prospect-table";
 import { Manager, ProspectWithManager } from "@/types/database";
+import { resolveStage } from "@/lib/campaign-stage";
 
 export default async function ProspectsPage() {
   const supabase = await createClient();
 
-  const [{ data: prospects, error }, { data: managers }] = await Promise.all([
-    supabase
-      .from("prospects")
-      .select("*, manager:managers(*)")
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("managers")
-      .select("*")
-      .order("name", { ascending: true }),
-  ]);
+  const [{ data: prospects, error }, { data: managers }, { data: campaigns }] =
+    await Promise.all([
+      supabase
+        .from("prospects")
+        .select("*, manager:managers(*)")
+        .order("created_at", { ascending: false }),
+      supabase.from("managers").select("*").order("name", { ascending: true }),
+      // 거래 단계는 연결된 캠페인에서 파생한다 (lib/account-stage.ts)
+      supabase
+        .from("campaigns")
+        .select("id, campaign_name, status, start_date, end_date, prospect_id")
+        .not("prospect_id", "is", null),
+    ]);
 
   if (error) {
     return (
@@ -24,15 +30,30 @@ export default async function ProspectsPage() {
     );
   }
 
+  // 가망건별 캠페인 목록 — 마이그레이션 021 적용 전이면 campaigns가 null이라 빈 맵
+  const campaignsByProspect: Record<string, LinkedCampaign[]> = {};
+  for (const c of campaigns ?? []) {
+    if (!c.prospect_id) continue;
+    (campaignsByProspect[c.prospect_id] ??= []).push({
+      id: c.id,
+      campaign_name: c.campaign_name,
+      stage: resolveStage(c),
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-bold text-gray-900">가망건 관리</h1>
-        <p className="text-sm text-gray-500 mt-1">쇼피 입점 링크를 발송한 업체를 관리합니다.</p>
+        <h1 className="text-xl font-bold text-gray-900">거래처 관리</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          컨택한 업체를 한곳에서 관리합니다. 캠페인을 등록하면 가망에서 거래처로
+          자동 전환됩니다.
+        </p>
       </div>
       <ProspectTable
         initialProspects={(prospects as ProspectWithManager[]) ?? []}
         managers={(managers as Manager[]) ?? []}
+        campaignsByProspect={campaignsByProspect}
       />
     </div>
   );

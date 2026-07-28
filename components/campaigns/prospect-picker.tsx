@@ -67,7 +67,7 @@ export default function ProspectPicker({ onPick, onClose }: ProspectPickerProps)
           )
         );
       } catch {
-        if (!cancelled) setError("가망건을 불러오지 못했습니다.");
+        if (!cancelled) setError("거래처를 불러오지 못했습니다.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -103,7 +103,7 @@ export default function ProspectPicker({ onPick, onClose }: ProspectPickerProps)
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
             <h2 className="text-base font-semibold text-gray-900">
-              가망건에서 불러오기
+              거래처에서 불러오기
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
               선택하면 클라이언트명이 채워지고, 이 캠페인의 출처로 기록됩니다.
@@ -159,7 +159,7 @@ export default function ProspectPicker({ onPick, onClose }: ProspectPickerProps)
           ) : filtered.length === 0 ? (
             <p className="py-16 text-center text-sm text-gray-400">
               {prospects.length === 0
-                ? "등록된 가망건이 없습니다."
+                ? "등록된 거래처가 없습니다."
                 : "검색 결과가 없습니다."}
             </p>
           ) : (

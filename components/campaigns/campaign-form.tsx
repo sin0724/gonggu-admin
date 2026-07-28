@@ -679,7 +679,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
                 onClick={() => setPickerOpen(true)}
                 className="text-xs font-medium text-primary-600 hover:text-primary-700 hover:underline"
               >
-                가망건에서 불러오기
+                거래처에서 불러오기
               </button>
             </div>
             <input

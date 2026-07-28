@@ -82,7 +82,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: "영업 · 정산",
     items: [
       { href: "/settlements", label: "정산 관리", icon: ICON.money },
-      { href: "/prospects", label: "가망건 관리", icon: ICON.building },
+      { href: "/prospects", label: "거래처 관리", icon: ICON.building },
       { href: "/managers", label: "담당자 관리", icon: ICON.user },
     ],
   },

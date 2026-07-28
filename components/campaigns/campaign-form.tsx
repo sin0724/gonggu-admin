@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import ProspectPicker, {
+  PickedProspect,
+} from "@/components/campaigns/prospect-picker";
 import { Campaign, CampaignInsert, PriceTier } from "@/types/database";
 import { krwToTwd, formatTwd } from "@/lib/utils";
 import {
@@ -171,6 +174,7 @@ function PriceCaption({
 
 export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,6 +200,14 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   // 목표 판매액 입력 통화 — 가격 통화와 독립. 기본 원화.
   const [targetCurrency, setTargetCurrency] = useState<"krw" | "twd">("krw");
 
+  // 가망건 연결 — 가망건 관리에서 넘어온 업체가 캠페인이 되는 경우가 많아
+  // 출처를 남긴다. 직접 등록한 캠페인은 null.
+  const [prospectId, setProspectId] = useState<string | null>(
+    campaign?.prospect_id ?? null
+  );
+  const [prospectLabel, setProspectLabel] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const [formData, setFormData] = useState({
     client_name: campaign?.client_name ?? "",
     campaign_name: campaign?.campaign_name ?? "",
@@ -219,6 +231,49 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     purchase_form_url: campaign?.purchase_form_url ?? "",
     drive_url: campaign?.drive_url ?? "",
   });
+
+  // 가망건 목록의 "캠페인 등록"에서 넘어오면 ?prospect=<id>로 들어온다.
+  // 수정 화면에서는 이미 연결된 가망건의 이름을 보여주기 위해 읽는다.
+  const prospectParam = searchParams.get("prospect");
+  useEffect(() => {
+    const id = mode === "create" ? prospectParam : campaign?.prospect_id;
+    if (!id) return;
+
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("prospects")
+        .select("id, company_name")
+        .eq("id", id)
+        .maybeSingle();
+      if (cancelled || !data) return;
+
+      setProspectId(data.id);
+      setProspectLabel(data.company_name);
+      // 신규 등록일 때만 클라이언트명을 채운다 (수정 중인 값을 덮어쓰지 않도록)
+      if (mode === "create") {
+        setFormData((prev) =>
+          prev.client_name ? prev : { ...prev, client_name: data.company_name }
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [prospectParam, campaign?.prospect_id, mode]);
+
+  const handlePickProspect = (p: PickedProspect) => {
+    setProspectId(p.id);
+    setProspectLabel(p.company_name);
+    setFormData((prev) => ({ ...prev, client_name: p.company_name }));
+    setPickerOpen(false);
+  };
+
+  const clearProspect = () => {
+    setProspectId(null);
+    setProspectLabel(null);
+  };
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -505,6 +560,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         // 모든 가격은 부가세 포함으로 통일 — VAT 별도 옵션 폐기
         vat_included: true,
         status: formData.status as CampaignStage,
+        prospect_id: prospectId,
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
         purchase_form_url: formData.purchase_form_url || null,
@@ -614,9 +670,18 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         <h2 className="text-base font-semibold text-gray-900 mb-5">기본 정보</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div>
-            <label className="label">
-              클라이언트명 <span className="text-red-500">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="label mb-0">
+                클라이언트명 <span className="text-red-500">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="text-xs font-medium text-primary-600 hover:text-primary-700 hover:underline"
+              >
+                가망건에서 불러오기
+              </button>
+            </div>
             <input
               type="text"
               name="client_name"
@@ -626,6 +691,20 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               placeholder="예: (주)브랜드명"
               required
             />
+            {prospectId && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500">
+                <span className="badge bg-indigo-50 text-indigo-700">가망건 연결</span>
+                <span className="truncate">{prospectLabel ?? "불러오는 중..."}</span>
+                <button
+                  type="button"
+                  onClick={clearProspect}
+                  className="text-gray-400 hover:text-red-500 shrink-0"
+                  title="연결 해제"
+                >
+                  ✕
+                </button>
+              </p>
+            )}
           </div>
           <div>
             <label className="label">
@@ -2114,6 +2193,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           )}
         </button>
       </div>
+
+      {pickerOpen && (
+        <ProspectPicker
+          onPick={handlePickProspect}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </form>
   );
 }

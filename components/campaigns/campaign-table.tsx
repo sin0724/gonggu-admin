@@ -234,6 +234,8 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
           client_name: campaign.client_name,
           // 복사본은 아직 확정 전이므로 항상 가망 단계에서 시작한다
           status: "lead",
+          // 같은 업체의 재진행이므로 가망건 출처는 그대로 이어받는다
+          prospect_id: campaign.prospect_id,
           deal_type: campaign.deal_type,
           normal_price: campaign.normal_price,
           online_min_price: campaign.online_min_price,

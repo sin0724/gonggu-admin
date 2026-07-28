@@ -98,6 +98,15 @@ export default async function CampaignDetailPage({
     0
   );
 
+  // 이 캠페인이 어느 가망건에서 시작됐는지 (직접 등록이면 없음)
+  const { data: sourceProspect } = campaign.prospect_id
+    ? await supabase
+        .from("prospects")
+        .select("id, company_name, status")
+        .eq("id", campaign.prospect_id)
+        .maybeSingle()
+    : { data: null };
+
   // 캠페인 일정 — 공구는 발송/오픈/마감 날짜 관리가 핵심이라 상세에서 바로 다룬다
   const { data: rawSchedules } = await supabase
     .from("campaign_schedules")
@@ -249,7 +258,18 @@ export default async function CampaignDetailPage({
                 size="md"
               />
             </div>
-            <p className="text-sm text-gray-500">{campaign.client_name}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-gray-500">{campaign.client_name}</p>
+              {sourceProspect && (
+                <Link
+                  href="/prospects"
+                  className="badge bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                  title={`가망건 "${sourceProspect.company_name}"에서 시작된 캠페인`}
+                >
+                  가망건 · {sourceProspect.status}
+                </Link>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Link href={`/campaigns/${id}/proposal`} className="btn-secondary">

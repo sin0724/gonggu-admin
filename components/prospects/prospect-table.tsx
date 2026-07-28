@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import Link from "next/link";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -266,6 +267,14 @@ export default function ProspectTable({ initialProspects, managers }: ProspectTa
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2 justify-end">
+                        {/* 가망건 → 캠페인 전환. 클라이언트명이 채워진 채로 열린다 */}
+                        <Link
+                          href={`/campaigns/new?prospect=${p.id}`}
+                          className="text-xs text-primary-600 hover:text-primary-700 hover:underline transition-colors whitespace-nowrap"
+                          title="이 업체로 캠페인을 등록합니다"
+                        >
+                          캠페인 등록
+                        </Link>
                         <button
                           onClick={() => handleEdit(p)}
                           className="text-xs text-gray-500 hover:text-primary-600 transition-colors"

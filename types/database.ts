@@ -79,6 +79,8 @@ export interface Campaign {
   campaign_name: string;
   /** 진행 단계 — lib/campaign-stage.ts 참고. 구 데이터 호환용으로 null 허용 */
   status: CampaignStage | null;
+  /** 이 캠페인이 시작된 가망건. 직접 등록한 캠페인은 null */
+  prospect_id: string | null;
   deal_type: DealType | null;
   normal_price: number | null;
   online_min_price: number | null;

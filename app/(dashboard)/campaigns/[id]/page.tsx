@@ -3,13 +3,14 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import {
   formatDate,
-  getCampaignStatus,
-  CAMPAIGN_STATUS_COLORS,
   formatWon,
   formatTwd,
   formatMoney,
   krwToTwd,
 } from "@/lib/utils";
+import { resolveStage } from "@/lib/campaign-stage";
+import StageSelect from "@/components/campaigns/stage-select";
+import SchedulePanel from "@/components/calendar/schedule-panel";
 import InfluencerTable from "@/components/influencers/influencer-table";
 import SellerTable from "@/components/sellers/seller-table";
 import {
@@ -20,6 +21,7 @@ import {
 } from "@/lib/economics";
 import {
   CampaignInfluencerWithDetails,
+  CampaignSchedule,
   CampaignSeller,
   PriceTier,
 } from "@/types/database";
@@ -96,8 +98,15 @@ export default async function CampaignDetailPage({
     0
   );
 
+  // 캠페인 일정 — 공구는 발송/오픈/마감 날짜 관리가 핵심이라 상세에서 바로 다룬다
+  const { data: rawSchedules } = await supabase
+    .from("campaign_schedules")
+    .select("*")
+    .eq("campaign_id", id)
+    .order("start_at");
+
   const records = (rawRecords ?? []) as CampaignInfluencerWithDetails[];
-  const campaignStatus = getCampaignStatus(campaign.start_date, campaign.end_date);
+  const campaignStage = resolveStage(campaign);
 
   const vendorFeeRate = campaign.vendor_fee_rate ?? 0;
   const influencerRsRate = campaign.influencer_rs_rate ?? 0;
@@ -222,7 +231,7 @@ export default async function CampaignDetailPage({
     <div className="space-y-5">
       {/* 브레드크럼 */}
       <nav className="flex items-center gap-2 text-sm text-gray-500">
-        <Link href="/campaigns" className="hover:text-gray-700">캠페인 관리</Link>
+        <Link href="/campaigns" className="hover:text-gray-700">전체 캠페인</Link>
         <span>/</span>
         <span className="text-gray-900 font-medium">{campaign.campaign_name}</span>
       </nav>
@@ -234,9 +243,11 @@ export default async function CampaignDetailPage({
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <h1 className="text-lg font-bold text-gray-900">{campaign.campaign_name}</h1>
-              <span className={`badge ${CAMPAIGN_STATUS_COLORS[campaignStatus]}`}>
-                {campaignStatus}
-              </span>
+              <StageSelect
+                campaignId={id}
+                stage={campaignStage}
+                size="md"
+              />
             </div>
             <p className="text-sm text-gray-500">{campaign.client_name}</p>
           </div>
@@ -564,7 +575,17 @@ export default async function CampaignDetailPage({
         </div>
       )}
 
-      {/* ③ 셀러 테이블 — 총판/개별 셀러/공동구매 업체 (공급가형 채널) */}
+      {/* ③ 캠페인 일정 — 구글 캘린더로도 내보낸다 */}
+      <SchedulePanel
+        campaign={{
+          id,
+          campaign_name: campaign.campaign_name,
+          client_name: campaign.client_name,
+        }}
+        schedules={(rawSchedules ?? []) as CampaignSchedule[]}
+      />
+
+      {/* ④ 셀러 테이블 — 총판/개별 셀러/공동구매 업체 (공급가형 채널) */}
       {(dealType === "supply" || sellers.length > 0) && (
         <SellerTable
           campaignId={id}
@@ -576,7 +597,7 @@ export default async function CampaignDetailPage({
         />
       )}
 
-      {/* ④ 인플루언서 테이블 */}
+      {/* ⑤ 인플루언서 테이블 */}
       <div>
         <InfluencerTable
           campaignId={id}

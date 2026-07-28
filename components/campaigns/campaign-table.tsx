@@ -7,14 +7,18 @@ import { createClient } from "@/lib/supabase/client";
 import { Campaign } from "@/types/database";
 import {
   formatDate,
-  getCampaignStatus,
-  CampaignStatus,
-  CAMPAIGN_STATUS_COLORS,
   formatMoney,
   formatWon,
   formatTwd,
   krwToTwd,
 } from "@/lib/utils";
+import {
+  CAMPAIGN_STAGES,
+  CampaignStage,
+  resolveStage,
+  STAGE_LABEL,
+} from "@/lib/campaign-stage";
+import StageSelect from "@/components/campaigns/stage-select";
 import { useToast } from "@/components/ui/toast";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
 
@@ -36,7 +40,8 @@ interface CampaignTableProps {
 type SortKey = "name" | "sales" | "achievement" | "pending" | "start" | "created";
 type SortDir = "asc" | "desc";
 
-const STATUS_TABS = ["전체", "예정", "진행중", "종료"] as const;
+/** 상태 탭 — "전체" + 진행 단계 7종 */
+type StageFilter = "all" | CampaignStage;
 
 /** 금액 셀 — TWD 메인 · 원화 보조. 환율 없으면 원화만. */
 function MoneyCell({ krw, rate }: { krw: number; rate: number | null }) {
@@ -78,7 +83,7 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
-  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_TABS)[number]>("전체");
+  const [statusFilter, setStatusFilter] = useState<StageFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("created");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -113,19 +118,16 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
     localStorage.setItem("campaignViewMode", mode);
   };
 
-  const statusOf = (c: Campaign): CampaignStatus =>
-    getCampaignStatus(c.start_date, c.end_date);
+  const stageOf = (c: Campaign): CampaignStage => resolveStage(c);
 
-  const statusCounts = STATUS_TABS.reduce(
-    (acc, tab) => {
-      acc[tab] =
-        tab === "전체"
-          ? campaigns.length
-          : campaigns.filter((c) => statusOf(c) === tab).length;
-      return acc;
-    },
-    {} as Record<(typeof STATUS_TABS)[number], number>
-  );
+  const stageTabs: { key: StageFilter; label: string; count: number }[] = [
+    { key: "all", label: "전체", count: campaigns.length },
+    ...CAMPAIGN_STAGES.map((s) => ({
+      key: s as StageFilter,
+      label: STAGE_LABEL[s],
+      count: campaigns.filter((c) => stageOf(c) === s).length,
+    })),
+  ];
 
   const statOf = (c: Campaign): CampaignStats =>
     stats[c.id] ?? { sales: 0, pendingCount: 0, achievement: null };
@@ -134,7 +136,7 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
     const matchSearch =
       c.campaign_name.toLowerCase().includes(search.toLowerCase()) ||
       c.client_name.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === "전체" || statusOf(c) === statusFilter;
+    const matchStatus = statusFilter === "all" || stageOf(c) === statusFilter;
     return matchSearch && matchStatus;
   });
 
@@ -230,6 +232,8 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
         .insert({
           campaign_name: `${campaign.campaign_name} (복사)`,
           client_name: campaign.client_name,
+          // 복사본은 아직 확정 전이므로 항상 가망 단계에서 시작한다
+          status: "lead",
           deal_type: campaign.deal_type,
           normal_price: campaign.normal_price,
           online_min_price: campaign.online_min_price,
@@ -364,25 +368,25 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
         </div>
       </div>
 
-      {/* 상태 탭 필터 */}
+      {/* 진행 단계 탭 필터 */}
       <div className="flex items-center gap-1 flex-wrap">
-        {STATUS_TABS.map((s) => (
+        {stageTabs.map((tab) => (
           <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
+            key={tab.key}
+            onClick={() => setStatusFilter(tab.key)}
             className={`btn btn-sm flex items-center gap-1.5 ${
-              statusFilter === s ? "btn-primary" : "btn-secondary"
+              statusFilter === tab.key ? "btn-primary" : "btn-secondary"
             }`}
           >
-            {s}
+            {tab.label}
             <span
               className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${
-                statusFilter === s
+                statusFilter === tab.key
                   ? "bg-white/30 text-white"
                   : "bg-gray-100 text-gray-600"
               }`}
             >
-              {statusCounts[s]}
+              {tab.count}
             </span>
           </button>
         ))}
@@ -398,7 +402,7 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {sorted.map((campaign) => {
-                const status = statusOf(campaign);
+                const stage = stageOf(campaign);
                 const stat = statOf(campaign);
                 return (
                   <div
@@ -411,9 +415,9 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
                         <p className="font-semibold text-gray-900 truncate">{campaign.campaign_name}</p>
                         <p className="text-sm text-gray-500 mt-0.5">{campaign.client_name}</p>
                       </div>
-                      <span className={`badge ml-2 shrink-0 ${CAMPAIGN_STATUS_COLORS[status]}`}>
-                        {status}
-                      </span>
+                      <div className="ml-2 shrink-0">
+                        <StageSelect campaignId={campaign.id} stage={stage} />
+                      </div>
                     </div>
                     <div className="text-xs text-gray-500 space-y-1">
                       <p>
@@ -486,7 +490,7 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
                   <SortHeader label="달성률" sortKey="achievement" />
                   <SortHeader label="정산대기" sortKey="pending" />
                   <SortHeader label="기간" sortKey="start" />
-                  <th className="table-header">상태</th>
+                  <th className="table-header">단계</th>
                   <th className="table-header text-right">관리</th>
                 </tr>
               </thead>
@@ -499,7 +503,7 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
                   </tr>
                 ) : (
                   sorted.map((campaign) => {
-                    const status = statusOf(campaign);
+                    const stage = stageOf(campaign);
                     const stat = statOf(campaign);
                     return (
                       <tr
@@ -539,9 +543,7 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
                             : "-"}
                         </td>
                         <td className="table-cell">
-                          <span className={`badge ${CAMPAIGN_STATUS_COLORS[status]}`}>
-                            {status}
-                          </span>
+                          <StageSelect campaignId={campaign.id} stage={stage} />
                         </td>
                         <td className="table-cell">
                           <div className="flex items-center justify-end">

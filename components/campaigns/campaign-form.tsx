@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Campaign, CampaignInsert, PriceTier } from "@/types/database";
 import { krwToTwd, formatTwd } from "@/lib/utils";
+import {
+  CAMPAIGN_STAGES,
+  CampaignStage,
+  resolveStage,
+  STAGE_DESCRIPTION,
+  STAGE_LABEL,
+} from "@/lib/campaign-stage";
 import { useToast } from "@/components/ui/toast";
 import {
   computeUnitEconomics,
@@ -192,6 +199,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   const [formData, setFormData] = useState({
     client_name: campaign?.client_name ?? "",
     campaign_name: campaign?.campaign_name ?? "",
+    // 신규는 가망에서 시작, 기존은 저장된 단계(없으면 날짜로 추론).
+    // handleChange가 모든 필드를 문자열로 넣으므로 여기서도 string으로 둔다.
+    status: (campaign ? resolveStage(campaign) : "lead") as string,
     normal_price: campaign?.normal_price?.toString() ?? "",
     online_min_price: campaign?.online_min_price?.toString() ?? "",
     supply_price: campaign?.supply_price?.toString() ?? "",
@@ -494,6 +504,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         shipping_payer: formData.shipping_payer || null,
         // 모든 가격은 부가세 포함으로 통일 — VAT 별도 옵션 폐기
         vat_included: true,
+        status: formData.status as CampaignStage,
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
         purchase_form_url: formData.purchase_form_url || null,
@@ -1969,11 +1980,32 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         )}
       </div>
 
-      {/* 공구 기간 */}
+      {/* 진행 단계 · 공구 기간 */}
       <div className="card p-6">
         <h2 className="text-base font-semibold text-gray-900 mb-5">
-          공구 기간
+          진행 단계 · 공구 기간
         </h2>
+
+        <div className="mb-5">
+          <label className="label">진행 단계</label>
+          <select
+            name="status"
+            value={formData.status}
+            onChange={handleChange}
+            className="input md:max-w-xs"
+          >
+            {CAMPAIGN_STAGES.map((s) => (
+              <option key={s} value={s}>
+                {STAGE_LABEL[s]} — {STAGE_DESCRIPTION[s]}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-1.5">
+            &quot;진행중&quot;·&quot;정산중&quot;은 캘린더에, &quot;가망&quot;·&quot;셋업&quot;·&quot;모집중&quot;은
+            대기 보드에 표시됩니다.
+          </p>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div>
             <label className="label">공구 시작일</label>

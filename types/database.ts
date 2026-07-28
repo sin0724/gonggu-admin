@@ -1,3 +1,5 @@
+import type { CampaignStage } from "@/lib/campaign-stage";
+
 export type Json =
   | string
   | number
@@ -34,6 +36,21 @@ export interface Database {
         Insert: CampaignSellerInsert;
         Update: CampaignSellerUpdate;
       };
+      campaign_schedules: {
+        Row: CampaignSchedule;
+        Insert: CampaignScheduleInsert;
+        Update: CampaignScheduleUpdate;
+      };
+      sellers: {
+        Row: Seller;
+        Insert: SellerInsert;
+        Update: SellerUpdate;
+      };
+      seller_sales: {
+        Row: SellerSale;
+        Insert: SellerSaleInsert;
+        Update: SellerSaleUpdate;
+      };
     };
   };
 }
@@ -60,6 +77,8 @@ export interface Campaign {
   id: string;
   client_name: string;
   campaign_name: string;
+  /** 진행 단계 — lib/campaign-stage.ts 참고. 구 데이터 호환용으로 null 허용 */
+  status: CampaignStage | null;
   deal_type: DealType | null;
   normal_price: number | null;
   online_min_price: number | null;
@@ -116,6 +135,131 @@ export interface CampaignSeller {
 
 export type CampaignSellerInsert = Omit<CampaignSeller, "id" | "created_at">;
 export type CampaignSellerUpdate = Partial<CampaignSellerInsert>;
+
+/** 캠페인 일정 유형 */
+export type ScheduleKind =
+  | "shipping"
+  | "content"
+  | "open"
+  | "close"
+  | "settlement"
+  | "meeting"
+  | "other";
+
+export const SCHEDULE_KIND_LABEL: Record<ScheduleKind, string> = {
+  shipping: "제품 발송",
+  content: "콘텐츠 업로드",
+  open: "공구 오픈",
+  close: "공구 마감",
+  settlement: "정산",
+  meeting: "미팅",
+  other: "기타",
+};
+
+/** 캘린더 칩 색 — 유형별로 한눈에 구분되게 */
+export const SCHEDULE_KIND_COLOR: Record<ScheduleKind, string> = {
+  shipping: "bg-amber-100 text-amber-800 border-amber-200",
+  content: "bg-violet-100 text-violet-800 border-violet-200",
+  open: "bg-green-100 text-green-800 border-green-200",
+  close: "bg-rose-100 text-rose-800 border-rose-200",
+  settlement: "bg-orange-100 text-orange-800 border-orange-200",
+  meeting: "bg-sky-100 text-sky-800 border-sky-200",
+  other: "bg-gray-100 text-gray-700 border-gray-200",
+};
+
+/**
+ * 캠페인 세부 일정. all_day면 start_at/end_at의 시각은 무시하고 날짜만 쓴다.
+ * /api/calendar/ics 피드를 통해 구글 캘린더에 그대로 노출된다.
+ */
+export interface CampaignSchedule {
+  id: string;
+  campaign_id: string;
+  title: string;
+  kind: ScheduleKind;
+  all_day: boolean;
+  start_at: string;
+  end_at: string | null;
+  location: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CampaignScheduleInsert = Omit<
+  CampaignSchedule,
+  "id" | "created_at" | "updated_at"
+>;
+export type CampaignScheduleUpdate = Partial<CampaignScheduleInsert>;
+
+export interface CampaignScheduleWithCampaign extends CampaignSchedule {
+  campaign: Pick<
+    Campaign,
+    "id" | "campaign_name" | "client_name" | "status"
+  > | null;
+}
+
+/** 공구 카테고리 — 셀러/KOL 분류에 공통으로 쓰는 프리셋 */
+export const GONGGU_CATEGORIES = [
+  "뷰티",
+  "헬스/건기식",
+  "패션",
+  "식품",
+  "리빙",
+  "유아",
+  "반려동물",
+  "디지털",
+  "기타",
+] as const;
+
+/**
+ * 셀러 마스터 — 대만 총판/공구 셀러/공동구매 업체의 상시 명단.
+ * campaign_sellers(캠페인별 거래)와 달리 조건(고정비·RS·카테고리)을 관리한다.
+ */
+export interface Seller {
+  id: string;
+  name: string;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  /** 판매 채널: 쇼피 / 라인 / 인스타 / 자사몰 등 */
+  channel: string | null;
+  channel_url: string | null;
+  region: string | null;
+  /** 주로 진행하는 공구 카테고리 */
+  categories: string[];
+  /** 고정비(원) — 캠페인당 무조건 지급 */
+  fixed_fee: number | null;
+  /** RS 요율(%) — 판매액 대비 셀러 몫 */
+  rs_rate: number | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SellerInsert = Omit<Seller, "id" | "created_at" | "updated_at">;
+export type SellerUpdate = Partial<SellerInsert>;
+
+/** 셀러의 과거 공구 실적. 우리 시스템 밖에서 진행한 건도 직접 기입 가능 */
+export interface SellerSale {
+  id: string;
+  seller_id: string;
+  campaign_id: string | null;
+  title: string;
+  sale_date: string | null;
+  /** 매출액(원) */
+  amount: number;
+  quantity: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export type SellerSaleInsert = Omit<SellerSale, "id" | "created_at">;
+export type SellerSaleUpdate = Partial<SellerSaleInsert>;
+
+export interface SellerWithSales extends Seller {
+  sales: SellerSale[];
+}
 
 export interface Influencer {
   id: string;

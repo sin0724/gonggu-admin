@@ -1,12 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { createFinanceClient } from "@/lib/supabase/finance";
 import Link from "next/link";
+import { formatDate, formatWon } from "@/lib/utils";
 import {
-  formatDate,
-  formatWon,
-  getCampaignStatus,
-  CAMPAIGN_STATUS_COLORS,
-} from "@/lib/utils";
+  ACTIVE_STAGES,
+  PIPELINE_STAGES,
+  resolveStage,
+  STAGE_COLOR,
+  STAGE_LABEL,
+} from "@/lib/campaign-stage";
 import { getProgressStatus } from "@/types/database";
 
 // 재무 실적은 외부 프로젝트(tianxia-finance) DB에서 매번 읽어야 하므로 캐시하지 않는다.
@@ -107,9 +109,13 @@ export default async function DashboardPage() {
   const maxIndex = monthly.findIndex((m) => m.total === monthlyMax);
 
   const totalCampaigns = campaigns?.length ?? 0;
-  const statusCounts = { 예정: 0, 진행중: 0, 종료: 0 };
+  // 진행 단계(campaigns.status) 기준 집계 — 날짜만으로는 가망/셋업을 구분할 수 없다
+  const stageCounts = { 대기: 0, 진행: 0, 종료: 0 };
   for (const c of campaigns ?? []) {
-    statusCounts[getCampaignStatus(c.start_date, c.end_date)]++;
+    const stage = resolveStage(c);
+    if (ACTIVE_STAGES.includes(stage)) stageCounts.진행++;
+    else if (PIPELINE_STAGES.includes(stage)) stageCounts.대기++;
+    else stageCounts.종료++;
   }
 
   // 정산 대기 금액 — 정산금액 미입력 건은 캠페인 RS율로 추정해 합산 (과소 표시 방지)
@@ -171,7 +177,7 @@ export default async function DashboardPage() {
     {
       label: "전체 캠페인",
       value: totalCampaigns,
-      sub: `진행중 ${statusCounts.진행중} · 예정 ${statusCounts.예정} · 종료 ${statusCounts.종료}`,
+      sub: `진행 ${stageCounts.진행} · 대기 ${stageCounts.대기} · 종료 ${stageCounts.종료}`,
       color: "bg-blue-50 text-blue-600",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -346,10 +352,7 @@ export default async function DashboardPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {recentCampaigns.map((campaign) => {
-                  const status = getCampaignStatus(
-                    campaign.start_date,
-                    campaign.end_date
-                  );
+                  const stage = resolveStage(campaign);
                   return (
                     <tr key={campaign.id} className="hover:bg-gray-50 transition-colors">
                       <td className="table-cell">
@@ -369,8 +372,8 @@ export default async function DashboardPage() {
                           : "-"}
                       </td>
                       <td className="table-cell">
-                        <span className={`badge ${CAMPAIGN_STATUS_COLORS[status]}`}>
-                          {status}
+                        <span className={`badge ${STAGE_COLOR[stage]}`}>
+                          {STAGE_LABEL[stage]}
                         </span>
                       </td>
                       <td className="table-cell text-gray-500 text-xs">

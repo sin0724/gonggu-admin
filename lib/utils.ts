@@ -60,43 +60,5 @@ export function formatMoney(
   return twd === null ? formatWon(krw) : `${formatTwd(twd)} (${formatWon(krw)})`;
 }
 
-export function isCampaignActive(
-  startDate: string | null,
-  endDate: string | null
-): boolean {
-  return getCampaignStatus(startDate, endDate) !== "종료";
-}
-
-export type CampaignStatus = "예정" | "진행중" | "종료";
-
-/**
- * 캠페인 상태 3단계 — 시작일이 미래면 "예정", 종료일이 지났으면 "종료", 그 외 "진행중".
- * 날짜가 둘 다 없으면 "진행중"으로 간주.
- */
-export function getCampaignStatus(
-  startDate: string | null,
-  endDate: string | null
-): CampaignStatus {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  if (startDate) {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-    if (start > today) return "예정";
-  }
-
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    if (end < today) return "종료";
-  }
-
-  return "진행중";
-}
-
-export const CAMPAIGN_STATUS_COLORS: Record<CampaignStatus, string> = {
-  예정: "bg-blue-100 text-blue-700",
-  진행중: "bg-green-100 text-green-700",
-  종료: "bg-gray-100 text-gray-600",
-};
+// 캠페인 상태는 날짜 추론(예정/진행중/종료)에서 명시적 진행 단계로 옮겼다.
+// 단일 소스는 lib/campaign-stage.ts — resolveStage / STAGE_LABEL / STAGE_COLOR 사용.

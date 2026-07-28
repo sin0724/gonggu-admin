@@ -68,8 +68,11 @@ export default async function CampaignsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-bold text-gray-900">캠페인 관리</h1>
-        <p className="text-sm text-gray-500 mt-1">공구 캠페인을 등록하고 관리합니다.</p>
+        <h1 className="text-xl font-bold text-gray-900">전체 캠페인</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          모든 공구 캠페인을 진행 단계별로 관리합니다. 단계 배지를 눌러 바로 바꿀 수
+          있습니다.
+        </p>
       </div>
 
       <CampaignTable campaigns={campaigns ?? []} stats={stats} />

@@ -13,6 +13,7 @@ import {
   hasBankDetails,
 } from "@/types/database";
 import type { CrmKol } from "@/lib/supabase/crm";
+import { formatCrmMoney } from "@/lib/supabase/crm";
 import { formatTwd, formatWon, krwToTwd } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 
@@ -518,6 +519,31 @@ export default function InfluencerModal({
                                 </span>
                               ))}
                             </div>
+                            {/* CRM에 등록된 진행 조건 — 섭외 판단이 여기서 필요하다 */}
+                            {(kol.fee_amount != null ||
+                              kol.rs_rate != null ||
+                              (kol.deliverables ?? []).length > 0) && (
+                              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                {formatCrmMoney(kol.fee_amount, kol.fee_currency) && (
+                                  <span className="text-[10px] font-semibold bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">
+                                    {formatCrmMoney(kol.fee_amount, kol.fee_currency)}
+                                  </span>
+                                )}
+                                {kol.rs_rate != null && (
+                                  <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                                    RS {kol.rs_rate}%
+                                  </span>
+                                )}
+                                {(kol.deliverables ?? []).slice(0, 3).map((d) => (
+                                  <span
+                                    key={d}
+                                    className="text-[10px] bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded"
+                                  >
+                                    {d}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </button>
                         ))
                       )}

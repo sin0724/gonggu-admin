@@ -1,19 +1,23 @@
-import { fetchCrmKols } from "@/lib/supabase/crm";
+import { fetchCrmKols, fetchTwdKrwRate } from "@/lib/supabase/crm";
 import KolTable from "@/components/kols/kol-table";
 
-// KOL 리스트는 tianxia-crm의 kols 테이블을 그대로 읽는다 (단일 소스).
+// KOL 리스트는 tianxia-crm의 kols(+ 공구매출 집계 뷰)를 그대로 읽는다 (단일 소스).
 // 등록·수정은 CRM에서 하고 여기서는 조회·검색만 한다.
 export const dynamic = "force-dynamic";
 
 export default async function KolsPage() {
-  const { kols, error } = await fetchCrmKols();
+  const [{ kols, error, degraded }, twdKrwRate] = await Promise.all([
+    fetchCrmKols(),
+    fetchTwdKrwRate(),
+  ]);
 
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-bold text-gray-900">KOL 리스트</h1>
         <p className="text-sm text-gray-500 mt-1">
-          tianxia-crm KOL 아카이브를 그대로 조회합니다. 등록·수정은 CRM에서 진행하세요.
+          tianxia-crm KOL 아카이브를 그대로 조회합니다. 고정비·RS·제공 항목과 지난
+          공구매출은 CRM에서 등록·수정하세요.
         </p>
       </div>
 
@@ -23,7 +27,7 @@ export default async function KolsPage() {
           <p className="mt-1 text-xs">{error}</p>
         </div>
       ) : (
-        <KolTable kols={kols} />
+        <KolTable kols={kols} twdKrwRate={twdKrwRate} degraded={degraded} />
       )}
     </div>
   );

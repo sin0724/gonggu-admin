@@ -200,10 +200,18 @@ export interface CampaignScheduleWithCampaign extends CampaignSchedule {
   > | null;
 }
 
-/** 공구 카테고리 — 셀러/KOL 분류에 공통으로 쓰는 프리셋 */
+/**
+ * 공구 카테고리 — 셀러/KOL 분류에 공통으로 쓰는 프리셋.
+ *
+ * ⚠️ tianxia-crm의 src/lib/constants.ts GONGGU_CATEGORY와 문자열이 완전히
+ * 일치해야 한다. CRM은 kols.gonggu_categories에 이 값을 그대로 저장하고,
+ * 이 앱은 그 배열로 필터하기 때문에 한 글자만 달라도 필터가 비어 보인다.
+ * "헬스·건기식"의 가운뎃점은 U+00B7 (·) — 슬래시가 아니다.
+ * 목록을 바꾸려면 두 프로젝트를 함께 배포해야 한다.
+ */
 export const GONGGU_CATEGORIES = [
   "뷰티",
-  "헬스/건기식",
+  "헬스·건기식",
   "패션",
   "식품",
   "리빙",

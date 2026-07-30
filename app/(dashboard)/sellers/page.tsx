@@ -31,7 +31,7 @@ export default async function SellersPage() {
       <div>
         <h1 className="text-xl font-bold text-gray-900">셀러 리스트</h1>
         <p className="text-sm text-gray-500 mt-1">
-          총판·공구 셀러의 고정비·RS·공구 카테고리와 지난 공구 매출을 관리합니다.
+          총판·공구 셀러의 고정비·RS·공구 카테고리와 지난 공구매출을 관리합니다.
         </p>
       </div>
 

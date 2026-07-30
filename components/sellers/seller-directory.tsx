@@ -16,7 +16,7 @@ import SellerSaleModal, {
 
 interface SellerDirectoryProps {
   sellers: Seller[];
-  /** 셀러별 과거 공구 실적 */
+  /** 셀러별 과거 공구매출 이력 */
   sales: SellerSale[];
   campaigns: SaleCampaignOption[];
 }
@@ -47,7 +47,7 @@ export default function SellerDirectory({
   const [deleteTarget, setDeleteTarget] = useState<Seller | null>(null);
   const [working, setWorking] = useState(false);
 
-  /** 셀러별 실적 집계 — 누적 매출과 건수 */
+  /** 셀러별 공구매출 집계 — 누적액과 건수 */
   const salesBySeller = useMemo(() => {
     const map = new Map<string, SellerSale[]>();
     for (const s of sales) {
@@ -105,7 +105,7 @@ export default function SellerDirectory({
     setWorking(true);
     try {
       const supabase = createClient();
-      // 실적까지 함께 사라지므로 스냅샷에 같이 담는다
+      // 공구매출 이력까지 함께 사라지므로 스냅샷에 같이 담는다
       await logDeletion({
         entityType: "seller",
         entityId: deleteTarget.id,
@@ -182,7 +182,7 @@ export default function SellerDirectory({
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             className="input w-auto"
           >
-            <option value="sales">누적 매출순</option>
+            <option value="sales">누적 공구매출순</option>
             <option value="name">이름순</option>
             <option value="recent">최근 등록순</option>
           </select>
@@ -218,8 +218,8 @@ export default function SellerDirectory({
                 <th className="table-header">공구 카테고리</th>
                 <th className="table-header text-right">고정비</th>
                 <th className="table-header text-right">RS</th>
-                <th className="table-header text-right">누적 매출</th>
-                <th className="table-header text-center">실적</th>
+                <th className="table-header text-right">누적 공구매출</th>
+                <th className="table-header text-center">공구매출</th>
                 <th className="table-header text-right">관리</th>
               </tr>
             </thead>
@@ -318,9 +318,9 @@ export default function SellerDirectory({
                             <button
                               onClick={() => setSaleModal({ seller: s })}
                               className="btn-secondary btn-sm"
-                              title="지난 공구 매출 기입"
+                              title="지난 공구매출 기입"
                             >
-                              실적 추가
+                              공구매출 추가
                             </button>
                             <button
                               onClick={() => setSellerModal({ mode: "edit", seller: s })}
@@ -338,14 +338,14 @@ export default function SellerDirectory({
                         </td>
                       </tr>
 
-                      {/* 실적 상세 */}
+                      {/* 공구매출 상세 */}
                       {isOpen && (
                         <tr className="bg-gray-50/70">
                           <td colSpan={7} className="px-4 py-3">
                             {sellerSales.length === 0 ? (
                               <p className="text-xs text-gray-400 py-4 text-center">
-                                등록된 공구 실적이 없습니다. &quot;실적 추가&quot;로
-                                지난 공구 매출을 기입하세요.
+                                등록된 공구매출이 없습니다. &quot;공구매출 추가&quot;로
+                                지난 공구매출을 기입하세요.
                               </p>
                             ) : (
                               <table className="w-full text-sm">
@@ -354,7 +354,7 @@ export default function SellerDirectory({
                                     <th className="text-left py-1.5 font-medium">진행일</th>
                                     <th className="text-left py-1.5 font-medium">공구명</th>
                                     <th className="text-right py-1.5 font-medium">수량</th>
-                                    <th className="text-right py-1.5 font-medium">매출액</th>
+                                    <th className="text-right py-1.5 font-medium">공구매출</th>
                                     <th className="text-left py-1.5 font-medium pl-4">메모</th>
                                     <th />
                                   </tr>
@@ -417,7 +417,7 @@ export default function SellerDirectory({
           </p>
           {grandTotal > 0 && (
             <p className="text-xs text-gray-600">
-              누적 매출 합계{" "}
+              누적 공구매출 합계{" "}
               <span className="font-semibold text-gray-900">
                 {formatWon(grandTotal)}
               </span>
@@ -452,7 +452,7 @@ export default function SellerDirectory({
         description={
           <>
             <b className="text-gray-800">&quot;{deleteTarget?.name}&quot;</b> 셀러와{" "}
-            <b className="text-red-600">등록된 공구 실적이 모두 삭제</b>됩니다.
+            <b className="text-red-600">등록된 공구매출 이력이 모두 삭제</b>됩니다.
             캠페인별 셀러 거래 기록은 남습니다.
           </>
         }

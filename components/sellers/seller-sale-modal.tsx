@@ -23,7 +23,7 @@ interface SellerSaleModalProps {
   onSaved: () => void;
 }
 
-/** 셀러의 지난 공구 실적 등록/수정 */
+/** 셀러의 지난 공구매출 등록·수정 */
 export default function SellerSaleModal({
   sellerId,
   sellerName,
@@ -77,7 +77,7 @@ export default function SellerSaleModal({
     }
     const amount = form.amount ? parseFloat(form.amount) : 0;
     if (isNaN(amount) || amount < 0) {
-      setError("매출액은 0 이상의 숫자여야 합니다.");
+      setError("공구매출은 0 이상의 숫자여야 합니다.");
       return;
     }
 
@@ -100,11 +100,11 @@ export default function SellerSaleModal({
           .update(payload)
           .eq("id", sale.id);
         if (err) throw err;
-        toast.success("실적이 수정되었습니다.");
+        toast.success("공구매출이 수정되었습니다.");
       } else {
         const { error: err } = await supabase.from("seller_sales").insert(payload);
         if (err) throw err;
-        toast.success("실적이 등록되었습니다.");
+        toast.success("공구매출이 등록되었습니다.");
       }
       onSaved();
     } catch {
@@ -131,7 +131,7 @@ export default function SellerSaleModal({
         .delete()
         .eq("id", sale.id);
       if (err) throw err;
-      toast.success("실적이 삭제되었습니다.");
+      toast.success("공구매출이 삭제되었습니다.");
       onSaved();
     } catch (e) {
       setError((e as Error).message || "삭제 중 오류가 발생했습니다.");
@@ -146,7 +146,7 @@ export default function SellerSaleModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
             <h2 className="text-base font-semibold text-gray-900">
-              {isEdit ? "공구 실적 수정" : "공구 실적 등록"}
+              {isEdit ? "공구매출 수정" : "공구매출 등록"}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">{sellerName}</p>
           </div>
@@ -200,7 +200,7 @@ export default function SellerSaleModal({
             </div>
             <div>
               <label className="label">
-                매출액 (원) <span className="text-red-500">*</span>
+                공구매출 (원) <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"

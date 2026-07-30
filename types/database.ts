@@ -242,14 +242,14 @@ export interface Seller {
 export type SellerInsert = Omit<Seller, "id" | "created_at" | "updated_at">;
 export type SellerUpdate = Partial<SellerInsert>;
 
-/** 셀러의 과거 공구 실적. 우리 시스템 밖에서 진행한 건도 직접 기입 가능 */
+/** 셀러의 과거 공구매출 이력. 우리 시스템 밖에서 진행한 건도 직접 기입 가능 */
 export interface SellerSale {
   id: string;
   seller_id: string;
   campaign_id: string | null;
   title: string;
   sale_date: string | null;
-  /** 매출액(원) */
+  /** 공구매출(원) */
   amount: number;
   quantity: number | null;
   notes: string | null;

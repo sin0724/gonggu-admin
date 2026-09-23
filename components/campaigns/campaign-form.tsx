@@ -757,7 +757,7 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           </div>
           <p className="text-xs text-emerald-600 leading-relaxed flex-1 min-w-[12rem]">
             {rate !== null && gongguPrice > 0
-              ? `공구가 ${fmt(gongguPrice)}원 = ${formatTwd(krwToTwd(gongguPrice, rate)!)} · 클라이언트 제안서와 화면 금액이 TWD를 메인으로 표기됩니다 (원화는 보조).`
+              ? `공구가 ${fmt(gongguPrice)}원 = ${formatTwd(krwToTwd(gongguPrice, rate)!)} · 화면 금액이 TWD를 메인으로 표기됩니다 (원화는 보조).`
               : "환율을 입력하면 모든 금액이 대만달러(TWD)를 메인으로 표기됩니다. 미입력 시 원화로만 표기됩니다."}
           </p>
         </div>

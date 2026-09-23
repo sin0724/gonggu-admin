@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
+import HelpTip from "@/components/ui/help-tip";
 import {
   Manager,
   ProspectWithManager,
@@ -168,7 +169,13 @@ export default function ProspectTable({
       <div className="flex flex-col gap-3">
         {/* 거래 단계 — 캠페인 연결에서 자동 파생 */}
         <div className="flex gap-2 flex-wrap items-center">
-          <span className="text-xs font-semibold text-gray-400 mr-1">거래 단계</span>
+          <span className="text-xs font-semibold text-gray-400 mr-1 flex items-center">
+            거래 단계
+            <HelpTip
+              align="left"
+              text="자동으로 정해지는 값입니다. 이 업체에 캠페인을 등록하면 가망 → 준비중 → 거래중 → 거래종료로 캠페인 단계를 따라 바뀝니다."
+            />
+          </span>
           {(["전체", ...ACCOUNT_STAGES] as const).map((s) => (
             <button
               key={s}
@@ -194,7 +201,13 @@ export default function ProspectTable({
 
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div className="flex gap-2 flex-wrap items-center">
-            <span className="text-xs font-semibold text-gray-400 mr-1">컨택 상태</span>
+            <span className="text-xs font-semibold text-gray-400 mr-1 flex items-center">
+              컨택 상태
+              <HelpTip
+                align="left"
+                text="담당자가 직접 바꾸는 값입니다. 쇼피 입점 링크를 보낸 뒤 업체 반응(입점완료·무응답·거절)을 기록합니다."
+              />
+            </span>
             {ALL_STATUSES.map((s) => (
               <button
                 key={s}

@@ -9,6 +9,7 @@ import {
   CAMPAIGN_STAGES,
   CampaignStage,
   STAGE_COLOR,
+  STAGE_DESCRIPTION,
   STAGE_LABEL,
 } from "@/lib/campaign-stage";
 
@@ -69,6 +70,8 @@ export default function StageSelect({
     <select
       value={value}
       disabled={saving}
+      // 처음 쓰는 사람이 단계 이름만으로 의미를 모를 때를 위해 설명을 띄운다
+      title={`${STAGE_LABEL[value]}: ${STAGE_DESCRIPTION[value]} (눌러서 단계 변경)`}
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => {
         e.stopPropagation();

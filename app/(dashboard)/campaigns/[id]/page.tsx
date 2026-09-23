@@ -10,6 +10,7 @@ import {
 } from "@/lib/utils";
 import { resolveStage } from "@/lib/campaign-stage";
 import StageSelect from "@/components/campaigns/stage-select";
+import HelpTip from "@/components/ui/help-tip";
 import SchedulePanel from "@/components/calendar/schedule-panel";
 import InfluencerTable from "@/components/influencers/influencer-table";
 import SellerTable from "@/components/sellers/seller-table";
@@ -272,12 +273,6 @@ export default async function CampaignDetailPage({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Link href={`/campaigns/${id}/proposal`} className="btn-secondary">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              클라이언트 제안서
-            </Link>
             <Link href={`/campaigns/${id}/edit`} className="btn-secondary">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -497,8 +492,9 @@ export default async function CampaignDetailPage({
 
           {/* 총 취급액 = KOL 판매 + 셀러 공급 */}
           <div className="card p-4 col-span-1 md:col-span-1">
-            <p className="text-xs text-gray-400 mb-1">
+            <p className="text-xs text-gray-400 mb-1 flex items-center">
               {hasSellerChannel ? "총 취급액 (KOL+셀러)" : "총 판매액"}
+              <HelpTip text="KOL별로 입력한 판매금액의 합계입니다. 셀러가 있으면 셀러 공급액(수량 × 견적 단가)도 더합니다." />
             </p>
             <MoneyKpi
               krw={combinedSales}
@@ -523,8 +519,9 @@ export default async function CampaignDetailPage({
           {/* 셀러 공급액 (B2B 채널) */}
           {hasSellerChannel && (
             <div className="card p-4 border-teal-200 bg-teal-50">
-              <p className="text-xs text-teal-600 font-medium mb-1">
+              <p className="text-xs text-teal-600 font-medium mb-1 flex items-center">
                 셀러 공급액 (우리 매출)
+                <HelpTip text="셀러가 우리에게 사가는 금액(수량 × 견적 단가)입니다. 마진은 여기서 브랜드 공급 원가를 뺀 값입니다." />
               </p>
               <MoneyKpi
                 krw={sellerRevenue}
@@ -541,7 +538,10 @@ export default async function CampaignDetailPage({
 
           {/* 벤더사 마진 - 가장 중요 */}
           <div className="card p-4 border-blue-200 bg-blue-50 col-span-1">
-            <p className="text-xs text-blue-500 font-medium mb-1">벤더사 마진 (우리)</p>
+            <p className="text-xs text-blue-500 font-medium mb-1 flex items-center">
+              벤더사 마진 (우리)
+              <HelpTip text="우리 회사가 실제로 남기는 돈입니다. 판매액에서 클라이언트 정산액과 KOL 지급액을 뺀 나머지이며, 빨간색이면 손해입니다." />
+            </p>
             <MoneyKpi
               krw={totalVendorMargin}
               rate={rate}
@@ -553,7 +553,10 @@ export default async function CampaignDetailPage({
 
           {/* KOL RS 지급액 */}
           <div className="card p-4">
-            <p className="text-xs text-gray-400 mb-1">KOL RS 지급액</p>
+            <p className="text-xs text-gray-400 mb-1 flex items-center">
+              KOL RS 지급액
+              <HelpTip text="KOL에게 줄 돈입니다. 정산금액을 입력했으면 그 합계, 아니면 판매액 × KOL RS%로 추정합니다." />
+            </p>
             <MoneyKpi
               krw={totalKolRs}
               rate={rate}
@@ -567,7 +570,13 @@ export default async function CampaignDetailPage({
 
           {/* 클라이언트 정산액 */}
           <div className="card p-4 border-green-200 bg-green-50">
-            <p className="text-xs text-green-500 font-medium mb-1">클라이언트 정산액</p>
+            <p className="text-xs text-green-500 font-medium mb-1 flex items-center">
+              클라이언트 정산액
+              <HelpTip
+                align="right"
+                text="브랜드(클라이언트)에게 지급할 돈입니다. RS형은 판매액 × (100 − 총 RS)%, 공급가형은 총수량 × 공급가입니다."
+              />
+            </p>
             <MoneyKpi
               krw={clientPayout}
               rate={rate}
@@ -579,7 +588,10 @@ export default async function CampaignDetailPage({
 
           {/* 미업로드 */}
           <div className={`card p-4 ${notUploadedCount > 0 ? "border-yellow-200 bg-yellow-50" : ""}`}>
-            <p className={`text-xs mb-1 ${notUploadedCount > 0 ? "text-yellow-500 font-medium" : "text-gray-400"}`}>미업로드</p>
+            <p className={`text-xs mb-1 flex items-center ${notUploadedCount > 0 ? "text-yellow-500 font-medium" : "text-gray-400"}`}>
+              미업로드
+              <HelpTip align="right" text="제품은 보냈지만 콘텐츠 업로드 체크가 안 된 KOL 수입니다. 아래 표에서 '업로드대기' 필터로 확인하세요." />
+            </p>
             <p className={`text-2xl font-bold ${notUploadedCount > 0 ? "text-yellow-600" : "text-gray-300"}`}>
               {notUploadedCount}<span className="text-sm font-normal ml-0.5">명</span>
             </p>
@@ -587,7 +599,10 @@ export default async function CampaignDetailPage({
 
           {/* 미정산 */}
           <div className={`card p-4 ${notSettledCount > 0 ? "border-orange-200 bg-orange-50" : ""}`}>
-            <p className={`text-xs mb-1 ${notSettledCount > 0 ? "text-orange-500 font-medium" : "text-gray-400"}`}>미정산</p>
+            <p className={`text-xs mb-1 flex items-center ${notSettledCount > 0 ? "text-orange-500 font-medium" : "text-gray-400"}`}>
+              미정산
+              <HelpTip align="right" text="업로드는 끝났지만 아직 정산(송금) 체크가 안 된 KOL 수입니다. 정산 관리 화면에서 한꺼번에 처리할 수 있습니다." />
+            </p>
             <p className={`text-2xl font-bold ${notSettledCount > 0 ? "text-orange-600" : "text-gray-300"}`}>
               {notSettledCount}<span className="text-sm font-normal ml-0.5">명</span>
             </p>

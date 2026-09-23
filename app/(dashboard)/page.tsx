@@ -5,6 +5,8 @@ import Link from "next/link";
 import { formatDate, formatWon } from "@/lib/utils";
 import {
   ACTIVE_STAGES,
+  CampaignStage,
+  CLOSED_STAGES,
   OPENED_STAGES,
   PIPELINE_STAGES,
   resolveStage,
@@ -12,7 +14,21 @@ import {
   STAGE_LABEL,
 } from "@/lib/campaign-stage";
 import ConversionFunnel from "@/components/dashboard/conversion-funnel";
-import { getProgressStatus } from "@/types/database";
+import TodayTasks, {
+  TaskCampaign,
+  TodaySchedule,
+} from "@/components/dashboard/today-tasks";
+import WelcomeBanner from "@/components/dashboard/welcome-banner";
+import HelpTip from "@/components/ui/help-tip";
+import { getProgressStatus, ScheduleKind } from "@/types/database";
+import {
+  addDays,
+  daysBetween,
+  formatDayLabel,
+  isoToKstDate,
+  kstToIso,
+  todayKey,
+} from "@/lib/schedule";
 
 // 재무 실적은 외부 프로젝트(tianxia-finance) DB에서 매번 읽어야 하므로 캐시하지 않는다.
 export const dynamic = "force-dynamic";
@@ -161,6 +177,69 @@ export default async function DashboardPage() {
 
   const recentCampaigns = campaigns?.slice(0, 5) ?? [];
 
+  // ── 오늘 할 일 ─────────────────────────────────────────────
+  // 종료·보류된 캠페인의 미처리 KOL은 이미 손 뗀 건이라 할 일에서 뺀다
+  const stageById = new Map<string, CampaignStage>(
+    (campaigns ?? []).map((c) => [c.id, resolveStage(c)])
+  );
+  const nameById = new Map<string, string>(
+    (campaigns ?? []).map((c) => [c.id, c.campaign_name])
+  );
+  const groupByCampaign = (rows: { campaign_id: string }[]): TaskCampaign[] => {
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(r.campaign_id, (counts.get(r.campaign_id) ?? 0) + 1);
+    return [...counts.entries()]
+      .map(([id, count]) => ({ id, name: nameById.get(id) ?? "(이름 없음)", count }))
+      .sort((a, b) => b.count - a.count);
+  };
+  // 발송은 섭외가 끝난 뒤(모집중·진행중)부터 챙길 일이다
+  const sendWaiting = groupByCampaign(
+    (campaignInfluencers ?? []).filter((ci) => {
+      const stage = stageById.get(ci.campaign_id);
+      return (
+        (stage === "recruiting" || stage === "live") &&
+        getProgressStatus(ci) === "발송대기"
+      );
+    })
+  );
+  const uploadWaiting = groupByCampaign(
+    (campaignInfluencers ?? []).filter((ci) => {
+      const stage = stageById.get(ci.campaign_id);
+      return (
+        stage !== undefined &&
+        !CLOSED_STAGES.includes(stage) &&
+        getProgressStatus(ci) === "업로드대기"
+      );
+    })
+  );
+
+  // 이번 주 일정 — 오늘(KST)부터 7일
+  const today = todayKey();
+  const { data: weekSchedules } = await supabase
+    .from("campaign_schedules")
+    .select("id, campaign_id, title, kind, start_at")
+    .gte("start_at", kstToIso(today))
+    .lt("start_at", kstToIso(addDays(today, 7)))
+    .order("start_at");
+  const todaySchedules: TodaySchedule[] = (weekSchedules ?? [])
+    .filter((s) => {
+      const stage = stageById.get(s.campaign_id);
+      return stage !== undefined && !CLOSED_STAGES.includes(stage);
+    })
+    .map((s) => {
+      const date = isoToKstDate(s.start_at);
+      const d = daysBetween(today, date);
+      return {
+        id: s.id,
+        campaignId: s.campaign_id,
+        campaignName: nameById.get(s.campaign_id) ?? "",
+        title: s.title,
+        kind: s.kind as ScheduleKind,
+        when: d === 0 ? "오늘" : d === 1 ? "내일" : `D-${d}`,
+        dateLabel: formatDayLabel(date),
+      };
+    });
+
   // ── 거래처 전환 퍼널 ────────────────────────────────────────
   // 각 단계는 앞 단계의 부분집합이어야 한다(누적). 컨택 상태는 별개 축이라 섞지 않는다.
   const totalAccounts = allProspects?.length ?? 0;
@@ -197,6 +276,7 @@ export default async function DashboardPage() {
       sub: confirmedSub,
       color: "bg-purple-50 text-purple-600",
       href: "/campaigns",
+      help: "재무관리 시스템(tianxia-finance)에서 확정된 공구 매출 합계입니다. 이 시스템에서 입력한 판매액과는 확정 시점 차이로 다를 수 있습니다.",
     },
     {
       label: "정산 대기 금액",
@@ -204,6 +284,7 @@ export default async function DashboardPage() {
       sub: `${pendingSettlement}건 — KOL 지급 예정${pendingHasEstimate ? " (미입력 건 RS율 추정 포함)" : ""}`,
       color: "bg-orange-50 text-orange-600",
       href: "/settlements",
+      help: "업로드까지 끝나고 판매금액이 입력됐지만 아직 송금하지 않은 KOL 정산금 합계입니다. 정산금액이 비어 있으면 캠페인 RS율로 추정합니다.",
     },
     {
       label: "KOL 지급 완료",
@@ -211,6 +292,7 @@ export default async function DashboardPage() {
       sub: `${completedSettlement}건 정산 완료`,
       color: "bg-green-50 text-green-600",
       href: "/settlements?tab=done",
+      help: "'정산 완료'로 처리된 KOL에게 지금까지 보낸 금액 합계입니다.",
     },
   ];
 
@@ -219,6 +301,8 @@ export default async function DashboardPage() {
       label: "전체 캠페인",
       value: totalCampaigns,
       sub: `진행 ${stageCounts.진행} · 대기 ${stageCounts.대기} · 종료 ${stageCounts.종료}`,
+      help: "진행 = 진행중·정산중, 대기 = 가망·셋업·모집중, 종료 = 종료·보류 단계의 캠페인 수입니다.",
+      href: "/campaigns",
       color: "bg-blue-50 text-blue-600",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -233,6 +317,8 @@ export default async function DashboardPage() {
         crmKolCount !== null
           ? `공구에 투입된 KOL · CRM 아카이브 ${crmKolCount.toLocaleString("ko-KR")}명`
           : "공구에 투입된 KOL (중복 제외)",
+      help: "캠페인에 한 번이라도 추가된 KOL 수(같은 KOL은 1명)입니다. CRM 아카이브는 섭외 가능한 전체 KOL 풀입니다.",
+      href: "/kols",
       color: "bg-purple-50 text-purple-600",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -244,6 +330,8 @@ export default async function DashboardPage() {
       label: "정산 대기",
       value: pendingSettlement,
       sub: "건 처리 필요",
+      help: "송금을 기다리는 KOL 건수입니다. 눌러서 정산 관리로 이동하세요.",
+      href: "/settlements",
       color: "bg-orange-50 text-orange-600",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -255,6 +343,8 @@ export default async function DashboardPage() {
       label: "정산 완료",
       value: completedSettlement,
       sub: "건 완료",
+      help: "정산 완료 처리된 KOL 건수입니다.",
+      href: "/settlements?tab=done",
       color: "bg-green-50 text-green-600",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -266,13 +356,31 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* 처음 온 사람용 안내 — 닫으면 다시 안 뜬다 */}
+      <WelcomeBanner />
+
+      {/* 오늘 할 일 — 현황 숫자보다 지금 손댈 일을 먼저 */}
+      <TodayTasks
+        pendingSettlement={pendingSettlement}
+        sendWaiting={sendWaiting}
+        uploadWaiting={uploadWaiting}
+        schedules={todaySchedules}
+      />
+
       {/* 통계 카드 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
-          <div key={stat.label} className="card p-5">
+          <Link
+            key={stat.label}
+            href={stat.href}
+            className="card p-5 hover:shadow-md transition-shadow"
+          >
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-sm text-gray-500">{stat.label}</p>
+                <p className="text-sm text-gray-500 flex items-center">
+                  {stat.label}
+                  <HelpTip text={stat.help} align="left" />
+                </p>
                 <p className="text-3xl font-bold text-gray-900 mt-1">
                   {stat.value.toLocaleString("ko-KR")}
                 </p>
@@ -282,7 +390,7 @@ export default async function DashboardPage() {
                 {stat.icon}
               </div>
             </div>
-          </div>
+          </Link>
         ))}
       </div>
 
@@ -294,8 +402,11 @@ export default async function DashboardPage() {
             href={stat.href}
             className="card p-5 hover:shadow-md transition-shadow"
           >
-            <div className={`inline-block text-xs font-medium px-2 py-1 rounded-md mb-2 ${stat.color}`}>
-              {stat.label}
+            <div className="flex items-center mb-2">
+              <span className={`inline-block text-xs font-medium px-2 py-1 rounded-md ${stat.color}`}>
+                {stat.label}
+              </span>
+              <HelpTip text={stat.help} align="left" />
             </div>
             <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
             <p className="text-xs text-gray-400 mt-1">{stat.sub}</p>

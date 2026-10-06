@@ -49,6 +49,8 @@ interface CampaignTableProps {
   managers?: Manager[];
   /** 로그인 계정 이메일 — "내 캠페인" 필터에서 나를 찾는 데 쓴다 */
   userEmail?: string | null;
+  /** URL ?manager= 로 들어온 초기 담당자 필터 */
+  initialManagerFilter?: string;
 }
 
 type SortKey = "name" | "sales" | "achievement" | "pending" | "start" | "created";
@@ -100,6 +102,7 @@ export default function CampaignTable({
   stats = {},
   managers = [],
   userEmail = null,
+  initialManagerFilter,
 }: CampaignTableProps) {
   const router = useRouter();
   const toast = useToast();
@@ -119,7 +122,9 @@ export default function CampaignTable({
 
   // 담당자 필터 + 일괄 배정
   const me = findManagerByEmail(managers, userEmail);
-  const [managerFilter, setManagerFilter] = useState<ManagerFilter>("all");
+  const [managerFilter, setManagerFilter] = useState<ManagerFilter>(
+    initialManagerFilter ?? "all"
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkManager, setBulkManager] = useState<string>("");
   const [bulkWorking, setBulkWorking] = useState(false);

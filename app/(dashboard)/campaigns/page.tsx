@@ -2,10 +2,16 @@ import { createClient } from "@/lib/supabase/server";
 import CampaignTable, {
   CampaignStats,
 } from "@/components/campaigns/campaign-table";
-import { resolveTierPrice } from "@/lib/economics";
-import { getProgressStatus, Manager, PriceTier } from "@/types/database";
+import { computeCampaignStats } from "@/lib/campaign-stats";
+import { Manager } from "@/types/database";
 
-export default async function CampaignsPage() {
+export default async function CampaignsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ manager?: string }>;
+}) {
+  // 대시보드 담당자별 실적에서 넘어오면 ?manager=<id|none>
+  const { manager: managerParam } = await searchParams;
   const supabase = await createClient();
 
   // 목록의 돈 컬럼(취급액·달성률·정산대기)을 위해 인플루언서/셀러 데이터를 함께 집계
@@ -42,37 +48,11 @@ export default async function CampaignsPage() {
     );
   }
 
-  const stats: Record<string, CampaignStats> = {};
-  for (const c of campaigns ?? []) {
-    const rows = (cis ?? []).filter((r) => r.campaign_id === c.id);
-    const kolSales = rows.reduce((sum, r) => sum + (r.sales_amount || 0), 0);
-    // 셀러 공급액 — 개별 단가 우선, 없으면 캠페인 구간 단가 (상세 화면과 동일 기준)
-    const quoteTiers = (c.seller_quote_tiers ?? []) as PriceTier[];
-    const sellerRevenue = (sellers ?? [])
-      .filter((s) => s.campaign_id === c.id)
-      .reduce(
-        (sum, s) =>
-          sum +
-          (s.quantity || 0) *
-            (s.quote_price ??
-              resolveTierPrice(
-                c.seller_quote_price ?? 0,
-                quoteTiers,
-                s.quantity || 0
-              )),
-        0
-      );
-    const combinedSales = kolSales + sellerRevenue;
-    stats[c.id] = {
-      sales: combinedSales,
-      pendingCount: rows.filter((r) => getProgressStatus(r) === "정산대기")
-        .length,
-      achievement:
-        c.target_sales && c.target_sales > 0
-          ? (combinedSales / c.target_sales) * 100
-          : null,
-    };
-  }
+  const stats: Record<string, CampaignStats> = computeCampaignStats(
+    campaigns ?? [],
+    cis ?? [],
+    sellers ?? []
+  );
 
   return (
     <div className="space-y-4">
@@ -89,6 +69,7 @@ export default async function CampaignsPage() {
         stats={stats}
         managers={(managers as Manager[]) ?? []}
         userEmail={user?.email ?? null}
+        initialManagerFilter={managerParam}
       />
     </div>
   );

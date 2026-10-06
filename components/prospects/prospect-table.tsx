@@ -11,6 +11,7 @@ import {
   ProspectStatus,
   PROSPECT_STATUS_COLORS,
 } from "@/types/database";
+import { isActiveManager } from "@/lib/managers";
 import ProspectModal from "./prospect-modal";
 import { logDeletion } from "@/lib/activity-log";
 import { CampaignStage, STAGE_LABEL } from "@/lib/campaign-stage";
@@ -278,7 +279,10 @@ export default function ProspectTable({
             >
               전체
             </button>
-            {managers.map((m) => (
+            {managers
+              // 퇴사자는 아직 거래처가 남아 있을 때만 (인수인계 누락 확인용)
+              .filter((m) => isActiveManager(m) || prospects.some((p) => p.manager_id === m.id))
+              .map((m) => (
               <button
                 key={m.id}
                 onClick={() => setManagerFilter(m.id)}
@@ -289,6 +293,7 @@ export default function ProspectTable({
                 }`}
               >
                 {m.name}
+                {!isActiveManager(m) && " (퇴사)"}
               </button>
             ))}
             <button

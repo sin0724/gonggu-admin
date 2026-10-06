@@ -128,7 +128,7 @@ export default function ActivityTable({ logs }: ActivityTableProps) {
                 <tr>
                   <td colSpan={5} className="py-16 text-center text-gray-400 text-sm">
                     {logs.length === 0
-                      ? "아직 삭제 기록이 없습니다."
+                      ? "아직 기록이 없습니다."
                       : "검색 결과가 없습니다."}
                   </td>
                 </tr>
@@ -174,7 +174,9 @@ export default function ActivityTable({ logs }: ActivityTableProps) {
                           <td colSpan={5} className="px-4 py-3">
                             <div className="flex items-center justify-between mb-2">
                               <p className="text-xs text-gray-500">
-                                삭제 직전의 원본입니다. 복구는 이 값을 보고 다시 등록하는 방식입니다.
+                                {log.action === "update"
+                                  ? "변경 내역입니다. 되돌릴 때는 이 값을 보고 다시 배정합니다."
+                                  : "삭제 직전의 원본입니다. 복구는 이 값을 보고 다시 등록하는 방식입니다."}
                               </p>
                               <button
                                 onClick={() => copySnapshot(log)}

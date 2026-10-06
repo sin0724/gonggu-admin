@@ -10,6 +10,7 @@ import {
 } from "@/lib/utils";
 import { resolveStage } from "@/lib/campaign-stage";
 import StageSelect from "@/components/campaigns/stage-select";
+import ManagerSelect from "@/components/campaigns/manager-select";
 import HelpTip from "@/components/ui/help-tip";
 import SchedulePanel from "@/components/calendar/schedule-panel";
 import InfluencerTable from "@/components/influencers/influencer-table";
@@ -24,6 +25,7 @@ import {
   CampaignInfluencerWithDetails,
   CampaignSchedule,
   CampaignSeller,
+  Manager,
   PriceTier,
 } from "@/types/database";
 
@@ -107,6 +109,12 @@ export default async function CampaignDetailPage({
         .eq("id", campaign.prospect_id)
         .maybeSingle()
     : { data: null };
+
+  // 담당자 배정 드롭다운용 명단
+  const { data: managers } = await supabase
+    .from("managers")
+    .select("*")
+    .order("name", { ascending: true });
 
   // 캠페인 일정 — 공구는 발송/오픈/마감 날짜 관리가 핵심이라 상세에서 바로 다룬다
   const { data: rawSchedules } = await supabase
@@ -270,6 +278,11 @@ export default async function CampaignDetailPage({
                   가망건 · {sourceProspect.status}
                 </Link>
               )}
+              <span className="text-xs text-gray-400 ml-1">담당</span>
+              <ManagerSelect
+                campaign={campaign}
+                managers={(managers as Manager[]) ?? []}
+              />
             </div>
           </div>
           <div className="flex items-center gap-2">

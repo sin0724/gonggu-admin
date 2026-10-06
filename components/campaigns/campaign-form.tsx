@@ -3,10 +3,19 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import {
+  assignableManagers,
+  findManagerByEmail,
+  isActiveManager,
+  roleOf,
+  ROLE_LABEL,
+} from "@/lib/managers";
+import { logAssignment } from "@/lib/activity-log";
+import { assignErrorMessage } from "@/lib/campaign-assign";
 import ProspectPicker, {
   PickedProspect,
 } from "@/components/campaigns/prospect-picker";
-import { Campaign, CampaignInsert, PriceTier } from "@/types/database";
+import { Campaign, CampaignInsert, Manager, PriceTier } from "@/types/database";
 import { krwToTwd, formatTwd } from "@/lib/utils";
 import {
   CAMPAIGN_STAGES,
@@ -207,6 +216,33 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   );
   const [prospectLabel, setProspectLabel] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // 캠페인 관리 담당자 — 퇴사·인수인계 때 "누가 맡던 캠페인인지"를 모으는 기준
+  const [managers, setManagers] = useState<Manager[]>([]);
+  const [managerId, setManagerId] = useState<string>(campaign?.manager_id ?? "");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const [{ data }, { data: auth }] = await Promise.all([
+        supabase.from("managers").select("*").order("name", { ascending: true }),
+        supabase.auth.getUser(),
+      ]);
+      if (cancelled) return;
+      const list = (data as Manager[]) ?? [];
+      setManagers(list);
+      // 관리 담당자가 직접 등록하는 경우가 대부분이라 본인을 기본값으로 둔다
+      if (mode === "create") {
+        const me = findManagerByEmail(list, auth.user?.email);
+        if (me && roleOf(me) === "ops" && isActiveManager(me)) {
+          setManagerId((prev) => prev || me.id);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
 
   const [formData, setFormData] = useState({
     client_name: campaign?.client_name ?? "",
@@ -561,6 +597,11 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         vat_included: true,
         status: formData.status as CampaignStage,
         prospect_id: prospectId,
+        // 024 마이그레이션 전 DB(컬럼 없음)에서도 저장이 깨지지 않도록, 담당자를 고르지 않았고
+        // 기존 값도 없으면 아예 보내지 않는다
+        ...(managerId || campaign?.manager_id !== undefined
+          ? { manager_id: managerId || null }
+          : {}),
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
         purchase_form_url: formData.purchase_form_url || null,
@@ -577,6 +618,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           .single();
 
         if (error) throw error;
+        if (managerId) {
+          await logAssignment({
+            campaignId: data.id,
+            label: payload.campaign_name,
+            context: `신규 등록 → ${managers.find((m) => m.id === managerId)?.name ?? ""}`,
+          });
+        }
         router.push(`/campaigns/${data.id}`);
       } else if (campaign) {
         const { error } = await supabase
@@ -585,6 +633,16 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           .eq("id", campaign.id);
 
         if (error) throw error;
+
+        if ((campaign.manager_id ?? "") !== managerId) {
+          const nameOf = (id: string | null | undefined) =>
+            id ? managers.find((m) => m.id === id)?.name ?? "(삭제된 담당자)" : "미배정";
+          await logAssignment({
+            campaignId: campaign.id,
+            label: payload.campaign_name,
+            context: `${nameOf(campaign.manager_id)} → ${nameOf(managerId)}`,
+          });
+        }
 
         const newRsRate = payload.influencer_rs_rate ?? 0;
         const oldRsRate = campaign.influencer_rs_rate ?? 0;
@@ -654,8 +712,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         mode === "create" ? "캠페인이 등록되었습니다." : "캠페인이 수정되었습니다."
       );
       router.refresh();
-    } catch {
-      setError("저장 중 오류가 발생했습니다. 다시 시도해주세요.");
+    } catch (e) {
+      const msg = assignErrorMessage(e);
+      setError(
+        msg.includes("024_")
+          ? msg
+          : "저장 중 오류가 발생했습니다. 다시 시도해주세요."
+      );
     } finally {
       setLoading(false);
     }
@@ -719,6 +782,25 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               placeholder="예: 2024 봄 공구 캠페인"
               required
             />
+          </div>
+          <div>
+            <label className="label">관리 담당자</label>
+            <select
+              value={managerId}
+              onChange={(e) => setManagerId(e.target.value)}
+              className="input"
+            >
+              <option value="">미배정</option>
+              {assignableManagers(managers, campaign?.manager_id).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({ROLE_LABEL[roleOf(m)]}
+                  {isActiveManager(m) ? "" : "·퇴사"})
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-400">
+              이 캠페인을 운영하는 사람. 퇴사·인수인계 때 이 기준으로 캠페인을 넘깁니다.
+            </p>
           </div>
         </div>
       </div>

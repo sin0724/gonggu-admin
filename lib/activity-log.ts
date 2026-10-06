@@ -16,7 +16,9 @@ export type ActivityEntity =
   | "seller"
   | "seller_sale"
   | "prospect"
-  | "manager";
+  | "manager"
+  /** 캠페인 담당자 배정·인수인계 (action = update) */
+  | "campaign_assignment";
 
 export const ENTITY_LABEL: Record<ActivityEntity, string> = {
   campaign: "캠페인",
@@ -27,6 +29,7 @@ export const ENTITY_LABEL: Record<ActivityEntity, string> = {
   seller_sale: "셀러 실적",
   prospect: "거래처",
   manager: "담당자",
+  campaign_assignment: "담당 배정",
 };
 
 export const ENTITY_COLOR: Record<ActivityEntity, string> = {
@@ -38,6 +41,7 @@ export const ENTITY_COLOR: Record<ActivityEntity, string> = {
   seller_sale: "bg-yellow-100 text-yellow-700",
   prospect: "bg-indigo-100 text-indigo-700",
   manager: "bg-gray-100 text-gray-600",
+  campaign_assignment: "bg-emerald-100 text-emerald-700",
 };
 
 export interface ActivityLog {
@@ -96,5 +100,47 @@ export async function logDeletion(params: LogDeletionParams): Promise<void> {
       );
     }
     throw new Error(`활동 로그 기록에 실패해 삭제를 중단했습니다: ${error.message}`);
+  }
+}
+
+interface LogAssignmentParams {
+  /** 단건 배정이면 캠페인 id, 일괄·인수인계면 null */
+  campaignId: string | null;
+  /** 예: "에코픽 공구" 또는 "캠페인 12건 인수인계" */
+  label: string;
+  /** 예: "임패유 → 이현우" */
+  context: string;
+  /** 어떤 캠페인이 누구에게서 누구로 갔는지 — 나중에 되돌릴 근거 */
+  snapshot?: unknown;
+}
+
+/**
+ * 담당 배정·인수인계 기록. "이 캠페인 원래 누구 담당이었지?"에 답하려고 남긴다.
+ *
+ * 삭제 로그와 달리 실패해도 배정 자체는 막지 않는다 — 배정은 언제든
+ * 다시 바꿀 수 있어서 기록 누락이 데이터 손실로 이어지지 않기 때문이다.
+ * 대신 실패 여부를 돌려줘서 호출부가 알릴 수 있게 한다.
+ */
+export async function logAssignment(params: LogAssignmentParams): Promise<boolean> {
+  try {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { error } = await supabase.from("activity_logs").insert({
+      actor_email: user?.email ?? null,
+      actor_id: user?.id ?? null,
+      action: "update",
+      entity_type: "campaign_assignment",
+      entity_id: params.campaignId,
+      entity_label: params.label,
+      context: params.context,
+      snapshot: params.snapshot
+        ? JSON.parse(JSON.stringify(params.snapshot))
+        : null,
+    });
+    return !error;
+  } catch {
+    return false;
   }
 }

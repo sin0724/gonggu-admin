@@ -8,9 +8,11 @@ import { BookIcon } from "@/components/guide/guide-drawer";
 
 interface HeaderProps {
   userEmail?: string;
+  /** 최종 관리자 — 담당자 명단 수정 권한 */
+  isAdmin?: boolean | null;
 }
 
-export default function Header({ userEmail }: HeaderProps) {
+export default function Header({ userEmail, isAdmin }: HeaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { open, openGuide, closeGuide } = useGuide();
@@ -43,7 +45,14 @@ export default function Header({ userEmail }: HeaderProps) {
           사용 가이드
         </button>
         {userEmail && (
-          <span className="text-sm text-gray-500 hidden md:inline">{userEmail}</span>
+          <span className="text-sm text-gray-500 hidden md:inline-flex items-center gap-1.5">
+            {isAdmin === true && (
+              <span className="badge bg-gray-900 text-white" title="담당자 명단을 관리할 수 있는 최종 관리자 계정">
+                최종 관리자
+              </span>
+            )}
+            {userEmail}
+          </span>
         )}
         <button onClick={handleLogout} className="btn-secondary btn-sm">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

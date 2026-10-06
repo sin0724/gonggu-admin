@@ -81,6 +81,8 @@ export interface Campaign {
   status: CampaignStage | null;
   /** 이 캠페인이 시작된 가망건. 직접 등록한 캠페인은 null */
   prospect_id: string | null;
+  /** 캠페인 관리 담당자 (managers.id). 미배정이면 null. 마이그레이션 024 전에는 undefined */
+  manager_id?: string | null;
   deal_type: DealType | null;
   normal_price: number | null;
   online_min_price: number | null;
@@ -350,11 +352,18 @@ export interface CampaignInfluencerWithDetails extends CampaignInfluencer {
   influencer: Influencer;
 }
 
+/** sales = 영업 담당자(거래처), ops = 관리 담당자(캠페인 운영) */
+export type ManagerRole = "sales" | "ops";
+
 export interface Manager {
   id: string;
   name: string;
   email: string | null;
   phone: string | null;
+  /** 마이그레이션 024 전 DB에서는 없을 수 있다 — lib/managers.ts roleOf()로 읽는다 */
+  role?: ManagerRole | null;
+  /** false = 퇴사. 마찬가지로 isActiveManager()로 읽는다 */
+  is_active?: boolean | null;
   created_at: string;
 }
 

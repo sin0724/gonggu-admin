@@ -2,7 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Manager, ManagerInsert } from "@/types/database";
+import { Manager, ManagerInsert, ManagerRole } from "@/types/database";
+import {
+  MANAGER_ROLES,
+  managerWriteErrorMessage,
+  PERMISSION_DENIED,
+  roleOf,
+  ROLE_DESCRIPTION,
+  ROLE_LABEL,
+} from "@/lib/managers";
 
 interface ManagerModalProps {
   manager?: Manager;
@@ -14,6 +22,7 @@ const EMPTY_FORM = {
   name: "",
   email: "",
   phone: "",
+  role: "ops" as ManagerRole,
 };
 
 export default function ManagerModal({ manager, onClose, onSaved }: ManagerModalProps) {
@@ -24,6 +33,7 @@ export default function ManagerModal({ manager, onClose, onSaved }: ManagerModal
           name: manager.name,
           email: manager.email ?? "",
           phone: manager.phone ?? "",
+          role: roleOf(manager),
         }
       : EMPTY_FORM
   );
@@ -55,22 +65,26 @@ export default function ManagerModal({ manager, onClose, onSaved }: ManagerModal
         name: formData.name,
         email: formData.email || null,
         phone: formData.phone || null,
+        role: formData.role,
       };
 
       if (isEdit) {
-        const { error } = await supabase
+        // RLS에 막히면 에러 없이 0건이 반영되므로 반영 건수로 권한을 확인한다
+        const { data, error } = await supabase
           .from("managers")
           .update(payload)
-          .eq("id", manager.id);
+          .eq("id", manager.id)
+          .select("id");
         if (error) throw error;
+        if (!data?.length) throw new Error(PERMISSION_DENIED);
       } else {
         const { error } = await supabase.from("managers").insert(payload);
         if (error) throw error;
       }
 
       onSaved();
-    } catch {
-      setError("저장 중 오류가 발생했습니다.");
+    } catch (e) {
+      setError(managerWriteErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -108,6 +122,31 @@ export default function ManagerModal({ manager, onClose, onSaved }: ManagerModal
           </div>
 
           <div>
+            <label className="label">
+              구분 <span className="text-red-500">*</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {MANAGER_ROLES.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, role: r }))}
+                  className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                    formData.role === r
+                      ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500"
+                      : "border-gray-200 hover:bg-gray-50"
+                  }`}
+                >
+                  <span className="block text-sm font-medium text-gray-900">
+                    {ROLE_LABEL[r]} 담당자
+                  </span>
+                  <span className="block text-xs text-gray-500">{ROLE_DESCRIPTION[r]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <label className="label">이메일</label>
             <input
               type="email"
@@ -117,6 +156,9 @@ export default function ManagerModal({ manager, onClose, onSaved }: ManagerModal
               className="input"
               placeholder="example@company.com"
             />
+            <p className="mt-1 text-xs text-gray-400">
+              로그인 계정 이메일과 같게 넣으면 캠페인 목록의 &apos;내 캠페인&apos;에 이 사람 담당 건이 모입니다.
+            </p>
           </div>
 
           <div>

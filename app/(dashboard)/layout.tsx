@@ -4,6 +4,7 @@ import Sidebar from "@/components/layout/sidebar";
 import Header from "@/components/layout/header";
 import ToastProvider from "@/components/ui/toast";
 import GuideProvider from "@/components/guide/guide-provider";
+import { fetchIsAdmin } from "@/lib/admin";
 
 export default async function DashboardLayout({
   children,
@@ -19,13 +20,15 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  const isAdmin = await fetchIsAdmin(supabase);
+
   return (
     <ToastProvider>
       <GuideProvider>
         <div className="flex h-screen overflow-hidden print:h-auto print:overflow-visible">
           <Sidebar />
           <div className="flex-1 flex flex-col overflow-hidden print:overflow-visible">
-            <Header userEmail={user.email} />
+            <Header userEmail={user.email} isAdmin={isAdmin} />
             <main className="flex-1 overflow-y-auto p-6 print:overflow-visible print:p-0">
               {children}
             </main>

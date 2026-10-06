@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Campaign } from "@/types/database";
+import { Campaign, Manager } from "@/types/database";
 import {
   formatDate,
   formatMoney,
@@ -22,6 +22,15 @@ import StageSelect from "@/components/campaigns/stage-select";
 import { useToast } from "@/components/ui/toast";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
 import { logDeletion } from "@/lib/activity-log";
+import ManagerSelect from "@/components/campaigns/manager-select";
+import {
+  assignableManagers,
+  findManagerByEmail,
+  isActiveManager,
+  roleOf,
+  ROLE_LABEL,
+} from "@/lib/managers";
+import { assignCampaigns, assignErrorMessage } from "@/lib/campaign-assign";
 
 /** 목록 페이지에서 서버 집계해 내려주는 캠페인별 지표 */
 export interface CampaignStats {
@@ -36,6 +45,10 @@ export interface CampaignStats {
 interface CampaignTableProps {
   campaigns: Campaign[];
   stats?: Record<string, CampaignStats>;
+  /** 담당자 명단 — 담당 배정·필터용 */
+  managers?: Manager[];
+  /** 로그인 계정 이메일 — "내 캠페인" 필터에서 나를 찾는 데 쓴다 */
+  userEmail?: string | null;
 }
 
 type SortKey = "name" | "sales" | "achievement" | "pending" | "start" | "created";
@@ -43,6 +56,9 @@ type SortDir = "asc" | "desc";
 
 /** 상태 탭 — "전체" + 진행 단계 7종 */
 type StageFilter = "all" | CampaignStage;
+
+/** 담당자 필터 — 전체 / 내 캠페인 / 미배정 / 특정 담당자 id */
+type ManagerFilter = "all" | "mine" | "none" | string;
 
 /** 금액 셀 — TWD 메인 · 원화 보조. 환율 없으면 원화만. */
 function MoneyCell({ krw, rate }: { krw: number; rate: number | null }) {
@@ -79,7 +95,12 @@ function AchievementCell({ value }: { value: number | null }) {
   );
 }
 
-export default function CampaignTable({ campaigns, stats = {} }: CampaignTableProps) {
+export default function CampaignTable({
+  campaigns,
+  stats = {},
+  managers = [],
+  userEmail = null,
+}: CampaignTableProps) {
   const router = useRouter();
   const toast = useToast();
   const [search, setSearch] = useState("");
@@ -95,6 +116,13 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
   const [copyTarget, setCopyTarget] = useState<Campaign | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Campaign | null>(null);
   const [working, setWorking] = useState(false);
+
+  // 담당자 필터 + 일괄 배정
+  const me = findManagerByEmail(managers, userEmail);
+  const [managerFilter, setManagerFilter] = useState<ManagerFilter>("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkManager, setBulkManager] = useState<string>("");
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("campaignViewMode");
@@ -138,8 +166,25 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
       c.campaign_name.toLowerCase().includes(search.toLowerCase()) ||
       c.client_name.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === "all" || stageOf(c) === statusFilter;
-    return matchSearch && matchStatus;
+    const mid = c.manager_id ?? null;
+    const matchManager =
+      managerFilter === "all" ||
+      (managerFilter === "mine"
+        ? !!me && mid === me.id
+        : managerFilter === "none"
+        ? !mid
+        : mid === managerFilter);
+    return matchSearch && matchStatus && matchManager;
   });
+
+  // 담당자별 칩 — 재직자 + 아직 캠페인이 남아 있는 퇴사자(인수인계 누락 확인용)
+  const managerCount = (id: string | null) =>
+    campaigns.filter((c) => (c.manager_id ?? null) === id).length;
+  const managerChips = assignableManagers(managers).concat(
+    managers.filter((m) => !isActiveManager(m) && managerCount(m.id) > 0)
+  );
+  const nameOfManager = (id: string | null | undefined) =>
+    id ? managers.find((m) => m.id === id)?.name ?? null : null;
 
   const sorted = [...filtered].sort((a, b) => {
     const dir = sortDir === "asc" ? 1 : -1;
@@ -167,6 +212,41 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
       setSortKey(key);
       // 금액·건수는 큰 값부터, 텍스트·날짜는 취향대로 — 기본 내림차순
       setSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
+
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allVisibleSelected = sorted.length > 0 && sorted.every((c) => selected.has(c.id));
+  const toggleSelectAll = () =>
+    setSelected(allVisibleSelected ? new Set() : new Set(sorted.map((c) => c.id)));
+
+  const handleBulkAssign = async () => {
+    const targets = campaigns.filter((c) => selected.has(c.id));
+    if (targets.length === 0) return;
+    setBulkWorking(true);
+    try {
+      const managerId = bulkManager === "__none" ? null : bulkManager;
+      const { logged } = await assignCampaigns({ targets, managerId, managers });
+      const name = nameOfManager(managerId);
+      toast.success(
+        name
+          ? `캠페인 ${targets.length}개를 ${name}님에게 배정했습니다.`
+          : `캠페인 ${targets.length}개의 배정을 해제했습니다.`
+      );
+      if (!logged) toast.info("배정은 저장됐지만 활동 로그 기록에 실패했습니다.");
+      setSelected(new Set());
+      setBulkManager("");
+      router.refresh();
+    } catch (e) {
+      toast.error(assignErrorMessage(e));
+    } finally {
+      setBulkWorking(false);
     }
   };
 
@@ -245,6 +325,8 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
           status: "lead",
           // 같은 업체의 재진행이므로 가망건 출처는 그대로 이어받는다
           prospect_id: campaign.prospect_id,
+          // 담당자도 이어받는다 (024 마이그레이션 전 DB에는 컬럼이 없어 넣지 않음)
+          ...(campaign.manager_id !== undefined ? { manager_id: campaign.manager_id } : {}),
           deal_type: campaign.deal_type,
           normal_price: campaign.normal_price,
           online_min_price: campaign.online_min_price,
@@ -403,6 +485,75 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
         ))}
       </div>
 
+      {/* 담당자 필터 */}
+      {managers.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-xs text-gray-500 mr-1">담당자</span>
+          {(
+            [
+              { key: "all", label: "전체", count: campaigns.length },
+              ...(me
+                ? [{ key: "mine", label: "내 캠페인", count: managerCount(me.id) }]
+                : []),
+              ...managerChips.map((m) => ({
+                key: m.id,
+                label: `${m.name}${isActiveManager(m) ? "" : " (퇴사)"}`,
+                count: managerCount(m.id),
+                role: roleOf(m),
+              })),
+              { key: "none", label: "미배정", count: managerCount(null) },
+            ] as { key: ManagerFilter; label: string; count: number; role?: "sales" | "ops" }[]
+          ).map((chip) => (
+            <button
+              key={chip.key}
+              onClick={() => setManagerFilter(chip.key)}
+              title={chip.role ? `${ROLE_LABEL[chip.role]} 담당자` : undefined}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                managerFilter === chip.key
+                  ? "bg-gray-900 text-white"
+                  : chip.key === "none" && chip.count > 0
+                  ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {chip.label} {chip.count}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 일괄 배정 바 — 테이블에서 체크하면 나타난다 */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 flex-wrap bg-primary-50 border border-primary-200 rounded-xl px-4 py-3">
+          <span className="text-sm font-medium text-primary-800">
+            {selected.size}개 선택됨
+          </span>
+          <select
+            value={bulkManager}
+            onChange={(e) => setBulkManager(e.target.value)}
+            className="input w-auto py-1.5 text-sm"
+          >
+            <option value="">담당자 선택...</option>
+            {assignableManagers(managers).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} ({ROLE_LABEL[roleOf(m)]})
+              </option>
+            ))}
+            <option value="__none">배정 해제</option>
+          </select>
+          <button
+            onClick={handleBulkAssign}
+            disabled={!bulkManager || bulkWorking}
+            className="btn-primary btn-sm"
+          >
+            {bulkWorking ? "배정 중..." : "일괄 배정"}
+          </button>
+          <button onClick={() => setSelected(new Set())} className="btn-secondary btn-sm">
+            선택 해제
+          </button>
+        </div>
+      )}
+
       {/* 카드뷰 */}
       {viewMode === "card" ? (
         <>
@@ -425,6 +576,11 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-gray-900 truncate">{campaign.campaign_name}</p>
                         <p className="text-sm text-gray-500 mt-0.5">{campaign.client_name}</p>
+                        {managers.length > 0 && (
+                          <div className="mt-1.5">
+                            <ManagerSelect campaign={campaign} managers={managers} />
+                          </div>
+                        )}
                       </div>
                       <div className="ml-2 shrink-0">
                         <StageSelect campaignId={campaign.id} stage={stage} />
@@ -494,8 +650,18 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="table-header w-10">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAll}
+                      className="rounded border-gray-300"
+                      title="보이는 캠페인 전체 선택"
+                    />
+                  </th>
                   <SortHeader label="캠페인명" sortKey="name" />
                   <th className="table-header">클라이언트</th>
+                  <th className="table-header">담당자</th>
                   <th className="table-header">공구가</th>
                   <SortHeader label="취급액" sortKey="sales" />
                   <SortHeader label="달성률" sortKey="achievement" />
@@ -508,7 +674,7 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
               <tbody className="divide-y divide-gray-100">
                 {sorted.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-16 text-center text-gray-400 text-sm">
+                    <td colSpan={11} className="py-16 text-center text-gray-400 text-sm">
                       {search ? "검색 결과가 없습니다." : "등록된 캠페인이 없습니다."}
                     </td>
                   </tr>
@@ -520,14 +686,27 @@ export default function CampaignTable({ campaigns, stats = {} }: CampaignTablePr
                       <tr
                         key={campaign.id}
                         onClick={() => router.push(`/campaigns/${campaign.id}`)}
-                        className="hover:bg-gray-50 transition-colors cursor-pointer"
+                        className={`hover:bg-gray-50 transition-colors cursor-pointer ${
+                          selected.has(campaign.id) ? "bg-primary-50/50" : ""
+                        }`}
                       >
+                        <td className="table-cell" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(campaign.id)}
+                            onChange={() => toggleSelect(campaign.id)}
+                            className="rounded border-gray-300"
+                          />
+                        </td>
                         <td className="table-cell">
                           <span className="font-medium text-primary-600">
                             {campaign.campaign_name}
                           </span>
                         </td>
                         <td className="table-cell text-gray-600">{campaign.client_name}</td>
+                        <td className="table-cell whitespace-nowrap">
+                          <ManagerSelect campaign={campaign} managers={managers} />
+                        </td>
                         <td className="table-cell text-gray-500 text-xs whitespace-nowrap">
                           {campaign.gonggu_price
                             ? formatMoney(campaign.gonggu_price, campaign.exchange_rate)

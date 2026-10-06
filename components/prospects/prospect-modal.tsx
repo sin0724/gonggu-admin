@@ -8,6 +8,7 @@ import {
   ProspectInsert,
   ProspectStatus,
 } from "@/types/database";
+import { assignableManagers, managerLabel, roleOf } from "@/lib/managers";
 
 interface ProspectModalProps {
   prospect?: ProspectWithManager;
@@ -191,11 +192,14 @@ export default function ProspectModal({ prospect, managers, onClose, onSaved }: 
                 className="input"
               >
                 <option value="">담당자 없음</option>
-                {managers.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
+                {/* 거래처는 영업 담당자 몫이라 영업을 위로. 퇴사자는 기존 담당일 때만 보인다 */}
+                {assignableManagers(managers, prospect?.manager_id)
+                  .sort((x, y) => (roleOf(x) === roleOf(y) ? 0 : roleOf(x) === "sales" ? -1 : 1))
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {managerLabel(m)}
+                    </option>
+                  ))}
               </select>
             </div>
             <div>

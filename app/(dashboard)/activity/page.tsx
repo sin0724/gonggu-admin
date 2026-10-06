@@ -18,8 +18,8 @@ export default async function ActivityPage() {
       <div>
         <h1 className="text-xl font-bold text-gray-900">활동 로그</h1>
         <p className="text-sm text-gray-500 mt-1">
-          삭제된 항목의 원본과 실행자가 기록됩니다. 이 기록은 수정하거나 지울 수
-          없습니다.
+          삭제된 항목의 원본과 캠페인 담당 배정·인수인계 내역이 실행자와 함께
+          기록됩니다. 이 기록은 수정하거나 지울 수 없습니다.
         </p>
       </div>
 

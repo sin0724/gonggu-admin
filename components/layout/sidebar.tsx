@@ -129,7 +129,7 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/managers",
         label: "담당자 관리",
         icon: ICON.user,
-        desc: "거래처를 맡는 우리 팀원",
+        desc: "영업·관리 담당자, 인수인계",
       },
     ],
   },

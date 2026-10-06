@@ -11,6 +11,10 @@ import {
 import { resolveStage } from "@/lib/campaign-stage";
 import StageSelect from "@/components/campaigns/stage-select";
 import ManagerSelect from "@/components/campaigns/manager-select";
+import AssignmentConfirm from "@/components/incentives/assignment-confirm";
+import IncentivePanel from "@/components/incentives/incentive-panel";
+import { fetchIsAdmin } from "@/lib/admin";
+import type { CampaignExpense, CampaignSettlement } from "@/lib/incentive";
 import HelpTip from "@/components/ui/help-tip";
 import SchedulePanel from "@/components/calendar/schedule-panel";
 import InfluencerTable from "@/components/influencers/influencer-table";
@@ -115,6 +119,29 @@ export default async function CampaignDetailPage({
     .from("managers")
     .select("*")
     .order("name", { ascending: true });
+
+  // 인센티브 정산은 급여 정보라 최종 관리자에게만 (DB RLS도 같은 기준)
+  const isAdmin = await fetchIsAdmin(supabase);
+  const [{ data: settlements, error: settlementError }, { data: expenses }] =
+    isAdmin === true
+      ? await Promise.all([
+          supabase
+            .from("campaign_settlements")
+            .select("*")
+            .eq("campaign_id", id)
+            .order("deposited_on", { ascending: true, nullsFirst: false })
+            .order("created_at"),
+          supabase
+            .from("campaign_expenses")
+            .select("*")
+            .eq("campaign_id", id)
+            .order("spent_on", { ascending: true, nullsFirst: false })
+            .order("created_at"),
+        ])
+      : [{ data: null, error: null }, { data: null }];
+  // 025 미적용이면 테이블이 없다 → 패널 대신 안내
+  const incentiveReady = isAdmin === true && !settlementError;
+  const assignmentLocked = !!campaign.assignment_confirmed_at && isAdmin !== true;
 
   // 캠페인 일정 — 공구는 발송/오픈/마감 날짜 관리가 핵심이라 상세에서 바로 다룬다
   const { data: rawSchedules } = await supabase
@@ -267,7 +294,7 @@ export default async function CampaignDetailPage({
                 size="md"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <p className="text-sm text-gray-500">{campaign.client_name}</p>
               {sourceProspect && (
                 <Link
@@ -278,10 +305,24 @@ export default async function CampaignDetailPage({
                   가망건 · {sourceProspect.status}
                 </Link>
               )}
-              <span className="text-xs text-gray-400 ml-1">담당</span>
+              <span className="text-xs text-gray-400 ml-1">영업</span>
               <ManagerSelect
                 campaign={campaign}
                 managers={(managers as Manager[]) ?? []}
+                field="sales_manager_id"
+                locked={assignmentLocked}
+              />
+              <span className="text-xs text-gray-400">관리</span>
+              <ManagerSelect
+                campaign={campaign}
+                managers={(managers as Manager[]) ?? []}
+                locked={assignmentLocked}
+              />
+              <AssignmentConfirm
+                campaignId={id}
+                confirmedAt={campaign.assignment_confirmed_at}
+                confirmedBy={campaign.assignment_confirmed_by}
+                canConfirm={isAdmin === true}
               />
             </div>
           </div>
@@ -620,6 +661,21 @@ export default async function CampaignDetailPage({
               {notSettledCount}<span className="text-sm font-normal ml-0.5">명</span>
             </p>
           </div>
+        </div>
+      )}
+
+      {/* 인센티브 정산 — 최종 관리자 전용 */}
+      {incentiveReady && (
+        <IncentivePanel
+          campaign={campaign}
+          settlements={(settlements as CampaignSettlement[]) ?? []}
+          expenses={(expenses as CampaignExpense[]) ?? []}
+          managers={(managers as Manager[]) ?? []}
+        />
+      )}
+      {isAdmin === true && settlementError && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-sm">
+          인센티브 정산 기능을 켜려면 supabase/migrations/025_incentives.sql 을 적용해 주세요.
         </div>
       )}
 

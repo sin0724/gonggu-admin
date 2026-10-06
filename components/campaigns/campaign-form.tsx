@@ -220,15 +220,24 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
   // 캠페인 관리 담당자 — 퇴사·인수인계 때 "누가 맡던 캠페인인지"를 모으는 기준
   const [managers, setManagers] = useState<Manager[]>([]);
   const [managerId, setManagerId] = useState<string>(campaign?.manager_id ?? "");
+  // 영업 담당자 (인센티브 4%) — 거래처에서 불러오면 그 거래처 담당자가 기본값
+  const [salesManagerId, setSalesManagerId] = useState<string>(
+    campaign?.sales_manager_id ?? ""
+  );
+  // 담당이 확정된 캠페인은 최종 관리자만 담당을 바꿀 수 있다 (DB 트리거와 같은 기준)
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const assignmentLocked = !!campaign?.assignment_confirmed_at && isAdmin !== true;
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const supabase = createClient();
-      const [{ data }, { data: auth }] = await Promise.all([
+      const [{ data }, { data: auth }, adminRes] = await Promise.all([
         supabase.from("managers").select("*").order("name", { ascending: true }),
         supabase.auth.getUser(),
+        supabase.rpc("is_app_admin"),
       ]);
       if (cancelled) return;
+      setIsAdmin(adminRes.error ? null : adminRes.data === true);
       const list = (data as Manager[]) ?? [];
       setManagers(list);
       // 관리 담당자가 직접 등록하는 경우가 대부분이라 본인을 기본값으로 둔다
@@ -280,18 +289,20 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
       const supabase = createClient();
       const { data } = await supabase
         .from("prospects")
-        .select("id, company_name")
+        .select("id, company_name, manager_id")
         .eq("id", id)
         .maybeSingle();
       if (cancelled || !data) return;
 
       setProspectId(data.id);
       setProspectLabel(data.company_name);
-      // 신규 등록일 때만 클라이언트명을 채운다 (수정 중인 값을 덮어쓰지 않도록)
+      // 신규 등록일 때만 클라이언트명·영업 담당을 채운다 (수정 중인 값을 덮어쓰지 않도록)
       if (mode === "create") {
         setFormData((prev) =>
           prev.client_name ? prev : { ...prev, client_name: data.company_name }
         );
+        const pm = data.manager_id as string | null;
+        if (pm) setSalesManagerId((prev) => prev || pm);
       }
     })();
     return () => {
@@ -303,6 +314,8 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
     setProspectId(p.id);
     setProspectLabel(p.company_name);
     setFormData((prev) => ({ ...prev, client_name: p.company_name }));
+    const pm = p.manager_id;
+    if (pm && !assignmentLocked) setSalesManagerId((prev) => prev || pm);
     setPickerOpen(false);
   };
 
@@ -599,8 +612,12 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
         prospect_id: prospectId,
         // 024 마이그레이션 전 DB(컬럼 없음)에서도 저장이 깨지지 않도록, 담당자를 고르지 않았고
         // 기존 값도 없으면 아예 보내지 않는다
-        ...(managerId || campaign?.manager_id !== undefined
+        // 담당이 잠긴 캠페인은 담당 칸을 아예 보내지 않는다
+        ...(!assignmentLocked && (managerId || campaign?.manager_id !== undefined)
           ? { manager_id: managerId || null }
+          : {}),
+        ...(!assignmentLocked && (salesManagerId || campaign?.sales_manager_id !== undefined)
+          ? { sales_manager_id: salesManagerId || null }
           : {}),
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
@@ -618,11 +635,13 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
           .single();
 
         if (error) throw error;
-        if (managerId) {
+        if (managerId || salesManagerId) {
+          const nm = (id: string) =>
+            id ? managers.find((m) => m.id === id)?.name ?? "미배정" : "미배정";
           await logAssignment({
             campaignId: data.id,
             label: payload.campaign_name,
-            context: `신규 등록 → ${managers.find((m) => m.id === managerId)?.name ?? ""}`,
+            context: `신규 등록 → 영업 ${nm(salesManagerId)} · 관리 ${nm(managerId)}`,
           });
         }
         router.push(`/campaigns/${data.id}`);
@@ -634,13 +653,20 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
 
         if (error) throw error;
 
-        if ((campaign.manager_id ?? "") !== managerId) {
-          const nameOf = (id: string | null | undefined) =>
-            id ? managers.find((m) => m.id === id)?.name ?? "(삭제된 담당자)" : "미배정";
+        const nameOf = (id: string | null | undefined) =>
+          id ? managers.find((m) => m.id === id)?.name ?? "(삭제된 담당자)" : "미배정";
+        if (!assignmentLocked && (campaign.manager_id ?? "") !== managerId) {
           await logAssignment({
             campaignId: campaign.id,
             label: payload.campaign_name,
             context: `${nameOf(campaign.manager_id)} → ${nameOf(managerId)}`,
+          });
+        }
+        if (!assignmentLocked && (campaign.sales_manager_id ?? "") !== salesManagerId) {
+          await logAssignment({
+            campaignId: campaign.id,
+            label: payload.campaign_name,
+            context: `영업 ${nameOf(campaign.sales_manager_id)} → ${nameOf(salesManagerId)}`,
           });
         }
 
@@ -784,11 +810,38 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
             />
           </div>
           <div>
-            <label className="label">관리 담당자</label>
+            <label className="label">
+              영업 담당자 <span className="text-xs font-normal text-gray-400">인센티브 4%</span>
+            </label>
+            <select
+              value={salesManagerId}
+              onChange={(e) => setSalesManagerId(e.target.value)}
+              disabled={assignmentLocked}
+              className="input disabled:bg-gray-50 disabled:text-gray-500"
+            >
+              <option value="">미배정</option>
+              {assignableManagers(managers, campaign?.sales_manager_id)
+                .sort((x, y) => (roleOf(x) === roleOf(y) ? 0 : roleOf(x) === "sales" ? -1 : 1))
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({ROLE_LABEL[roleOf(m)]}
+                    {isActiveManager(m) ? "" : "·퇴사"})
+                  </option>
+                ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-400">
+              이 브랜드를 데려온 사람. 거래처에서 불러오면 그 거래처 담당자가 자동으로 들어갑니다.
+            </p>
+          </div>
+          <div>
+            <label className="label">
+              관리 담당자 <span className="text-xs font-normal text-gray-400">인센티브 6%</span>
+            </label>
             <select
               value={managerId}
               onChange={(e) => setManagerId(e.target.value)}
-              className="input"
+              disabled={assignmentLocked}
+              className="input disabled:bg-gray-50 disabled:text-gray-500"
             >
               <option value="">미배정</option>
               {assignableManagers(managers, campaign?.manager_id).map((m) => (
@@ -799,7 +852,9 @@ export default function CampaignForm({ campaign, mode }: CampaignFormProps) {
               ))}
             </select>
             <p className="mt-1 text-xs text-gray-400">
-              이 캠페인을 운영하는 사람. 퇴사·인수인계 때 이 기준으로 캠페인을 넘깁니다.
+              {assignmentLocked
+                ? "🔒 담당이 확정된 캠페인입니다. 변경은 최종 관리자에게 요청하세요."
+                : "이 캠페인을 운영하는 사람. 퇴사·인수인계 때 이 기준으로 캠페인을 넘깁니다."}
             </p>
           </div>
         </div>

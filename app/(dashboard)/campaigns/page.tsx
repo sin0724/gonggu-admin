@@ -4,6 +4,7 @@ import CampaignTable, {
 } from "@/components/campaigns/campaign-table";
 import { computeCampaignStats } from "@/lib/campaign-stats";
 import { Manager } from "@/types/database";
+import { fetchIsAdmin } from "@/lib/admin";
 
 export default async function CampaignsPage({
   searchParams,
@@ -23,6 +24,7 @@ export default async function CampaignsPage({
     {
       data: { user },
     },
+    isAdmin,
   ] = await Promise.all([
       supabase
         .from("campaigns")
@@ -38,6 +40,7 @@ export default async function CampaignsPage({
         .select("campaign_id, quantity, quote_price"),
       supabase.from("managers").select("*").order("name", { ascending: true }),
       supabase.auth.getUser(),
+      fetchIsAdmin(supabase),
     ]);
 
   if (error) {
@@ -70,6 +73,7 @@ export default async function CampaignsPage({
         managers={(managers as Manager[]) ?? []}
         userEmail={user?.email ?? null}
         initialManagerFilter={managerParam}
+        isAdmin={isAdmin === true}
       />
     </div>
   );

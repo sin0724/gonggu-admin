@@ -17,7 +17,7 @@ export interface PerfCampaign {
   date: string;
   /** 관리 담당자 */
   managerId: string | null;
-  /** 이 캠페인이 나온 거래처의 영업 담당자 */
+  /** 영업 담당자 (캠페인 영업 담당, 없으면 거래처 담당자) */
   sourceManagerId: string | null;
   /** 이 캠페인이 시작된 거래처. 직접 등록이면 null */
   prospectId: string | null;
@@ -157,10 +157,13 @@ export default function ManagerPerformance({
     } else {
       // 거래처에서 시작하지 않은 캠페인은 영업 기여를 따질 수 없으므로 뺀다
       for (const c of inPeriod) {
-        if (!c.prospectId) continue;
+        // 영업 담당도 없고 거래처에서 시작하지도 않은 캠페인은 영업 기여를 따질 수 없다
+        if (!c.prospectId && !c.sourceManagerId) continue;
         const r = rowOf(c.sourceManagerId);
-        r.linked.add(c.prospectId);
-        if (OPENED_STAGES.includes(c.stage)) r.opened.add(c.prospectId);
+        if (c.prospectId) {
+          r.linked.add(c.prospectId);
+          if (OPENED_STAGES.includes(c.stage)) r.opened.add(c.prospectId);
+        }
         r.sales += c.sales;
       }
       for (const p of prospectCounts) {
@@ -202,7 +205,7 @@ export default function ManagerPerformance({
           <p className="text-xs text-gray-400 mt-0.5">
             {basis === "ops"
               ? "캠페인 담당자 기준 — 누가 운영한 캠페인이 얼마나 팔렸는지"
-              : "거래처 담당자 기준 — 누가 데려온 업체가 얼마나 팔렸는지"}
+              : "캠페인 영업 담당 기준 — 누가 데려온 업체가 얼마나 팔렸는지"}
           </p>
         </div>
         {/* 필터는 한 줄에 */}
@@ -416,7 +419,7 @@ export default function ManagerPerformance({
       <p className="px-5 py-3 text-[11px] text-gray-400 border-t border-gray-100">
         {basis === "ops"
           ? "진행 중 = 종료·보류가 아닌 캠페인. 행을 누르면 그 담당자의 캠페인 목록으로 이동합니다."
-          : "담당 거래처 수는 기간과 무관한 현재 기준입니다. 공구 오픈 % = 기간 내 공구를 연 업체 ÷ 담당 거래처. 거래처 없이 직접 등록한 캠페인은 빠집니다."}
+          : "담당 거래처 수는 기간과 무관한 현재 기준입니다. 공구 오픈 % = 기간 내 공구를 연 업체 ÷ 담당 거래처. 취급액은 캠페인의 영업 담당 기준입니다."}
       </p>
     </div>
   );

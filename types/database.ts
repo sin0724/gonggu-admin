@@ -83,6 +83,13 @@ export interface Campaign {
   prospect_id: string | null;
   /** 캠페인 관리 담당자 (managers.id). 미배정이면 null. 마이그레이션 024 전에는 undefined */
   manager_id?: string | null;
+  /** 영업 담당자 (인센티브 4%). 마이그레이션 025 전에는 undefined */
+  sales_manager_id?: string | null;
+  /** 담당 확정 시각 — 확정 후에는 최종 관리자만 담당 변경 가능 */
+  assignment_confirmed_at?: string | null;
+  assignment_confirmed_by?: string | null;
+  /** 유가시딩: 광고주에게 따로 받은 KOL 예산(원). 공구 인센티브 계산 제외 */
+  paid_seeding_amount?: number | null;
   deal_type: DealType | null;
   normal_price: number | null;
   online_min_price: number | null;

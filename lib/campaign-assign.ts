@@ -7,7 +7,16 @@ export interface AssignTarget {
   id: string;
   campaign_name: string;
   manager_id?: string | null;
+  sales_manager_id?: string | null;
 }
+
+/** 어느 담당을 바꾸는지 — 관리(manager_id, 6%) / 영업(sales_manager_id, 4%) */
+export type AssignField = "manager_id" | "sales_manager_id";
+
+export const ASSIGN_FIELD_LABEL: Record<AssignField, string> = {
+  manager_id: "관리",
+  sales_manager_id: "영업",
+};
 
 /**
  * 컬럼이 아직 없는 DB(024 미적용)에서 나는 에러를 사람이 알아들을 말로 바꾼다.
@@ -15,6 +24,12 @@ export interface AssignTarget {
  */
 export function assignErrorMessage(e: unknown): string {
   const err = e as { code?: string; message?: string };
+  if (/ASSIGNMENT_LOCKED/.test(err?.message ?? "")) {
+    return (err.message ?? "").replace(/^.*ASSIGNMENT_LOCKED:\s*/, "");
+  }
+  if (/sales_manager_id/.test(err?.message ?? "")) {
+    return "영업 담당 컬럼이 없습니다. supabase/migrations/025_incentives.sql 을 적용해 주세요.";
+  }
   if (err?.code === "42703" || err?.code === "PGRST204" || /manager_id/.test(err?.message ?? "")) {
     return "담당자 배정 컬럼이 없습니다. supabase/migrations/024_manager_roles_and_campaign_assignment.sql 을 적용해 주세요.";
   }
@@ -32,21 +47,25 @@ export async function assignCampaigns({
   managerId,
   managers,
   reason,
+  field = "manager_id",
 }: {
   targets: AssignTarget[];
+  /** 기본은 관리 담당 */
+  field?: AssignField;
   /** null이면 배정 해제 */
   managerId: string | null;
   managers: Manager[];
   /** 로그 제목. 없으면 단건은 캠페인명, 여러 건은 "캠페인 N건 배정" */
   reason?: string;
 }): Promise<{ logged: boolean }> {
-  const changed = targets.filter((t) => (t.manager_id ?? null) !== managerId);
+  const current = (t: AssignTarget) => (t[field] ?? null) as string | null;
+  const changed = targets.filter((t) => current(t) !== managerId);
   if (changed.length === 0) return { logged: true };
 
   const supabase = createClient();
   const { error } = await supabase
     .from("campaigns")
-    .update({ manager_id: managerId })
+    .update({ [field]: managerId })
     .in(
       "id",
       changed.map((t) => t.id)
@@ -56,18 +75,20 @@ export async function assignCampaigns({
   const nameOf = (id: string | null | undefined) =>
     id ? managers.find((m) => m.id === id)?.name ?? "(삭제된 담당자)" : "미배정";
 
-  const fromNames = Array.from(new Set(changed.map((t) => nameOf(t.manager_id))));
+  const fromNames = Array.from(new Set(changed.map((t) => nameOf(current(t)))));
+  const prefix = field === "sales_manager_id" ? "영업 " : "";
   const logged = await logAssignment({
     campaignId: changed.length === 1 ? changed[0].id : null,
     label:
       reason ??
       (changed.length === 1 ? changed[0].campaign_name : `캠페인 ${changed.length}건 배정`),
-    context: `${fromNames.join(", ")} → ${nameOf(managerId)}`,
+    context: `${prefix}${fromNames.join(", ")} → ${nameOf(managerId)}`,
     snapshot: changed.map((t) => ({
       campaign_id: t.id,
       campaign_name: t.campaign_name,
-      from_manager_id: t.manager_id ?? null,
-      from_manager: nameOf(t.manager_id),
+      field,
+      from_manager_id: current(t),
+      from_manager: nameOf(current(t)),
       to_manager_id: managerId,
       to_manager: nameOf(managerId),
     })),

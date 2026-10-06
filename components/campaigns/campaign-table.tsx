@@ -51,6 +51,8 @@ interface CampaignTableProps {
   userEmail?: string | null;
   /** URL ?manager= 로 들어온 초기 담당자 필터 */
   initialManagerFilter?: string;
+  /** 최종 관리자 — 담당 확정된 캠페인도 담당 변경 가능 */
+  isAdmin?: boolean;
 }
 
 type SortKey = "name" | "sales" | "achievement" | "pending" | "start" | "created";
@@ -103,6 +105,7 @@ export default function CampaignTable({
   managers = [],
   userEmail = null,
   initialManagerFilter,
+  isAdmin = false,
 }: CampaignTableProps) {
   const router = useRouter();
   const toast = useToast();
@@ -232,7 +235,11 @@ export default function CampaignTable({
     setSelected(allVisibleSelected ? new Set() : new Set(sorted.map((c) => c.id)));
 
   const handleBulkAssign = async () => {
-    const targets = campaigns.filter((c) => selected.has(c.id));
+    const picked = campaigns.filter((c) => selected.has(c.id));
+    // 담당 확정된 캠페인은 최종 관리자만 바꿀 수 있어 일괄 배정에서 뺀다
+    const targets = isAdmin ? picked : picked.filter((c) => !c.assignment_confirmed_at);
+    const skipped = picked.length - targets.length;
+    if (skipped > 0) toast.info(`담당 확정된 캠페인 ${skipped}개는 제외했습니다.`);
     if (targets.length === 0) return;
     setBulkWorking(true);
     try {
@@ -304,7 +311,15 @@ export default function CampaignTable({
         .from("campaigns")
         .delete()
         .eq("id", deleteTarget.id);
-      if (error) throw error;
+      if (error) {
+        // 23503 = 외래키 — 인센티브 정산·실비 기록이 있는 캠페인 (급여 근거라 지우지 않는다)
+        if (error.code === "23503") {
+          throw new Error(
+            "인센티브 정산·직접 실비 기록이 있는 캠페인은 삭제할 수 없습니다. 무산된 건이면 단계를 '보류'로 바꿔주세요."
+          );
+        }
+        throw error;
+      }
       toast.success(`"${deleteTarget.campaign_name}" 캠페인이 삭제되었습니다.`);
       setDeleteTarget(null);
       router.refresh();
@@ -332,6 +347,9 @@ export default function CampaignTable({
           prospect_id: campaign.prospect_id,
           // 담당자도 이어받는다 (024 마이그레이션 전 DB에는 컬럼이 없어 넣지 않음)
           ...(campaign.manager_id !== undefined ? { manager_id: campaign.manager_id } : {}),
+          ...(campaign.sales_manager_id !== undefined
+            ? { sales_manager_id: campaign.sales_manager_id }
+            : {}),
           deal_type: campaign.deal_type,
           normal_price: campaign.normal_price,
           online_min_price: campaign.online_min_price,
@@ -583,7 +601,11 @@ export default function CampaignTable({
                         <p className="text-sm text-gray-500 mt-0.5">{campaign.client_name}</p>
                         {managers.length > 0 && (
                           <div className="mt-1.5">
-                            <ManagerSelect campaign={campaign} managers={managers} />
+                            <ManagerSelect
+                              campaign={campaign}
+                              managers={managers}
+                              locked={!!campaign.assignment_confirmed_at && !isAdmin}
+                            />
                           </div>
                         )}
                       </div>
@@ -710,7 +732,11 @@ export default function CampaignTable({
                         </td>
                         <td className="table-cell text-gray-600">{campaign.client_name}</td>
                         <td className="table-cell whitespace-nowrap">
-                          <ManagerSelect campaign={campaign} managers={managers} />
+                          <ManagerSelect
+                            campaign={campaign}
+                            managers={managers}
+                            locked={!!campaign.assignment_confirmed_at && !isAdmin}
+                          />
                         </td>
                         <td className="table-cell text-gray-500 text-xs whitespace-nowrap">
                           {campaign.gonggu_price

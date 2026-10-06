@@ -291,7 +291,13 @@ export default async function DashboardPage() {
     date: c.start_date ?? c.created_at.slice(0, 10),
     managerId: c.manager_id ?? null,
     prospectId: c.prospect_id ?? null,
-    sourceManagerId: c.prospect_id ? prospectManager.get(c.prospect_id) ?? null : null,
+    // 캠페인 영업 담당(025)이 있으면 그것, 없으면(구 DB) 거래처 담당자로 추정
+    sourceManagerId:
+      c.sales_manager_id !== undefined
+        ? c.sales_manager_id ?? null
+        : c.prospect_id
+        ? prospectManager.get(c.prospect_id) ?? null
+        : null,
     sales: campaignStats[c.id]?.sales ?? 0,
     target: c.target_sales,
     pendingCount: campaignStats[c.id]?.pendingCount ?? 0,

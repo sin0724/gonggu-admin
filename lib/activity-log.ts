@@ -18,7 +18,9 @@ export type ActivityEntity =
   | "prospect"
   | "manager"
   /** 캠페인 담당자 배정·인수인계 (action = update) */
-  | "campaign_assignment";
+  | "campaign_assignment"
+  | "campaign_settlement"
+  | "campaign_expense";
 
 export const ENTITY_LABEL: Record<ActivityEntity, string> = {
   campaign: "캠페인",
@@ -30,6 +32,8 @@ export const ENTITY_LABEL: Record<ActivityEntity, string> = {
   prospect: "거래처",
   manager: "담당자",
   campaign_assignment: "담당 배정",
+  campaign_settlement: "공구 정산",
+  campaign_expense: "직접 실비",
 };
 
 export const ENTITY_COLOR: Record<ActivityEntity, string> = {
@@ -42,6 +46,8 @@ export const ENTITY_COLOR: Record<ActivityEntity, string> = {
   prospect: "bg-indigo-100 text-indigo-700",
   manager: "bg-gray-100 text-gray-600",
   campaign_assignment: "bg-emerald-100 text-emerald-700",
+  campaign_settlement: "bg-purple-100 text-purple-700",
+  campaign_expense: "bg-rose-100 text-rose-700",
 };
 
 export interface ActivityLog {

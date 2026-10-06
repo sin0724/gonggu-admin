@@ -14,6 +14,8 @@ export interface PickedProspect {
   business_number: string;
   contact_name: string | null;
   phone: string | null;
+  /** 거래처 담당자 — 캠페인 영업 담당 기본값으로 쓴다 */
+  manager_id: string | null;
 }
 
 interface ProspectPickerProps {
@@ -177,6 +179,7 @@ export default function ProspectPicker({ onPick, onClose }: ProspectPickerProps)
                           business_number: p.business_number,
                           contact_name: p.contact_name,
                           phone: p.phone,
+                          manager_id: p.manager_id,
                         })
                       }
                       className="w-full text-left px-6 py-3 hover:bg-primary-50/60 transition-colors flex items-center gap-3"
